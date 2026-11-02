@@ -35,6 +35,24 @@ jobs:
         run: |
           cargo build --locked --release 2>&1 | Tee-Object -FilePath cargo-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Collect debug GUI startup diagnostics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = (Resolve-Path 'target/debug/AirCard-Safe.exe').Path
+          $gui = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden -RedirectStandardError gui-debug-stderr.log -RedirectStandardOutput gui-debug-stdout.log
+          try {
+            Start-Sleep -Seconds 5
+            if ($gui.HasExited) {
+              Get-Content gui-debug-stderr.log
+              Get-Content gui-debug-stdout.log
+              throw "Debug GUI exited with code $($gui.ExitCode)"
+            }
+          } finally {
+            if (-not $gui.HasExited) { Stop-Process -Id $gui.Id -Force }
+          }
       - name: PE verifier regression tests
         shell: pwsh
         run: ./scripts/test-verify-pe.ps1
@@ -46,10 +64,14 @@ jobs:
           $pe = ./scripts/verify-pe.ps1 -Path $exe
           $check = Start-Process -FilePath $exe -ArgumentList '--self-check' -Wait -PassThru -WindowStyle Hidden
           if ($check.ExitCode -ne 0) { throw 'Self-check failed' }
-          $gui = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden
+          $gui = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden -RedirectStandardError gui-release-stderr.log -RedirectStandardOutput gui-release-stdout.log
           try {
             Start-Sleep -Seconds 5
-            if ($gui.HasExited) { throw 'GUI exited during launch smoke test' }
+            if ($gui.HasExited) {
+              Get-Content gui-release-stderr.log
+              Get-Content gui-release-stdout.log
+              throw "GUI exited during launch smoke test with code $($gui.ExitCode)"
+            }
           } finally {
             if (-not $gui.HasExited) { Stop-Process -Id $gui.Id -Force }
           }
@@ -72,4 +94,15 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 30
+      - name: Keep diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: AirCard-Safe-Diagnostic-Logs
+          path: |
+            cargo-test.log
+            cargo-build.log
+            gui-*.log
+          retention-days: 7
+
 
