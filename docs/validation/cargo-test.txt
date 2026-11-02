@@ -1,0 +1,14 @@
+    Updating crates.io index
+error: failed to get `anyhow` as a dependency of package `aircard v1.2.4 ([workspace])`
+
+Caused by:
+  failed to load source for dependency `anyhow`
+
+Caused by:
+  unable to update registry `crates-io`
+
+Caused by:
+  download of config.json failed
+
+Caused by:
+  [6] Could not resolve hostname (Could not resolve host: index.crates.io)

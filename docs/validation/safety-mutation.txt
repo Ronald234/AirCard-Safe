@@ -1,0 +1,35 @@
+
+running 9 tests
+test altered_or_missing_backup_bytes_fail_verification ... ok
+test books_restoration_allows_empty_original_files ... ok
+test books_presence_errors_fail_but_remaining_files_are_restored ... ok
+test usb_requires_usb_and_rejects_ambiguous_network_route ... ok
+test identifiers_reject_slashes_quotes_and_padding_in_middle ... ok
+test books_failed_removal_or_wrong_readback_is_not_success ... ok
+test wallet_paths_reject_escape_and_keyboard_targets ... ok
+test cleanup_failure_is_never_reported_as_success ... FAILED
+test failed_write_still_restores_and_cleans_and_retains_all_errors ... FAILED
+
+failures:
+
+---- cleanup_failure_is_never_reported_as_success stdout ----
+
+thread 'cleanup_failure_is_never_reported_as_success' (5732) panicked at tests/safety_tests.rs:152:5:
+assertion failed: safety::run_with_cleanup(|| Ok(()), || Err("restore failed".into()),
+        || Ok(())).is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- failed_write_still_restores_and_cleans_and_retains_all_errors stdout ----
+
+thread 'failed_write_still_restores_and_cleans_and_retains_all_errors' (23556) panicked at tests/safety_tests.rs:141:5:
+assertion `left == right` failed
+  left: ["write", "cleanup"]
+ right: ["write", "restore", "cleanup"]
+
+
+failures:
+    cleanup_failure_is_never_reported_as_success
+    failed_write_still_restores_and_cleans_and_retains_all_errors
+
+test result: FAILED. 7 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

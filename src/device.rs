@@ -7,9 +7,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
-use crate::apple::{
-    AMDServiceConnectionRef, AMDeviceRef, AppleLibraries, get_apple_libraries,
-};
+use crate::apple::{AMDServiceConnectionRef, AMDeviceRef, AppleLibraries, get_apple_libraries};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum DeviceTransport {
@@ -40,28 +38,14 @@ impl DeviceTransport {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConnectionMode {
-    Auto,
     Usb,
-    Wifi,
 }
-
 impl ConnectionMode {
-    pub const ALL: [Self; 3] = [Self::Auto, Self::Usb, Self::Wifi];
-
     pub fn label(self) -> &'static str {
-        match self {
-            Self::Auto => "Auto (USB preferred)",
-            Self::Usb => "USB only",
-            Self::Wifi => "WiFi only",
-        }
+        "USB only"
     }
-
     fn accepts(self, transport: DeviceTransport) -> bool {
-        match self {
-            Self::Auto => true,
-            Self::Usb => transport == DeviceTransport::Usb,
-            Self::Wifi => transport == DeviceTransport::Wifi,
-        }
+        transport == DeviceTransport::Usb
     }
 }
 
@@ -81,7 +65,10 @@ impl DeviceInfo {
     }
 
     pub fn supports(&self, mode: ConnectionMode) -> bool {
-        self.transports.iter().copied().any(|transport| mode.accepts(transport))
+        self.transports
+            .iter()
+            .copied()
+            .any(|transport| mode.accepts(transport))
     }
 
     pub fn transport_summary(&self) -> String {
@@ -123,13 +110,25 @@ pub fn query_usbmux_devices() -> Result<Vec<UsbmuxDeviceEntry>> {
     stream.set_write_timeout(Some(Duration::from_secs(3)))?;
 
     let mut req_dict = HashMap::new();
-    req_dict.insert("MessageType".to_string(), plist::Value::String("ListDevices".to_string()));
-    req_dict.insert("ClientVersionString".to_string(), plist::Value::String("aircard".to_string()));
-    req_dict.insert("ProgName".to_string(), plist::Value::String("aircard".to_string()));
+    req_dict.insert(
+        "MessageType".to_string(),
+        plist::Value::String("ListDevices".to_string()),
+    );
+    req_dict.insert(
+        "ClientVersionString".to_string(),
+        plist::Value::String("aircard".to_string()),
+    );
+    req_dict.insert(
+        "ProgName".to_string(),
+        plist::Value::String("aircard".to_string()),
+    );
 
     let mut plist_bytes = Vec::new();
-    plist::to_writer_xml(&mut plist_bytes, &plist::Value::Dictionary(req_dict.into_iter().collect()))
-        .context("Failed to serialize ListDevices request")?;
+    plist::to_writer_xml(
+        &mut plist_bytes,
+        &plist::Value::Dictionary(req_dict.into_iter().collect()),
+    )
+    .context("Failed to serialize ListDevices request")?;
 
     let length = (plist_bytes.len() + 16) as u32;
     let version = 1u32;
@@ -150,8 +149,13 @@ pub fn query_usbmux_devices() -> Result<Vec<UsbmuxDeviceEntry>> {
     let mut resp_header = [0u8; 16];
     stream.read_exact(&mut resp_header)?;
 
-    let resp_len = u32::from_le_bytes([resp_header[0], resp_header[1], resp_header[2], resp_header[3]]) as usize;
-    if resp_len < 16 {
+    let resp_len = u32::from_le_bytes([
+        resp_header[0],
+        resp_header[1],
+        resp_header[2],
+        resp_header[3],
+    ]) as usize;
+    if !(16..=1024 * 1024).contains(&resp_len) {
         bail!("Invalid usbmux response length: {}", resp_len);
     }
 
@@ -161,8 +165,13 @@ pub fn query_usbmux_devices() -> Result<Vec<UsbmuxDeviceEntry>> {
     let val = plist::Value::from_reader(std::io::Cursor::new(payload))
         .context("Failed to parse usbmux ListDevices response plist")?;
 
-    let root_dict = val.as_dictionary().context("Expected dictionary in usbmux response")?;
-    let device_list = root_dict.get("DeviceList").and_then(|v| v.as_array()).context("Expected DeviceList array in usbmux response")?;
+    let root_dict = val
+        .as_dictionary()
+        .context("Expected dictionary in usbmux response")?;
+    let device_list = root_dict
+        .get("DeviceList")
+        .and_then(|v| v.as_array())
+        .context("Expected DeviceList array in usbmux response")?;
 
     let mut result = Vec::new();
     for entry in device_list {
@@ -177,7 +186,7 @@ pub fn query_usbmux_devices() -> Result<Vec<UsbmuxDeviceEntry>> {
                     let connection_type = props_dict
                         .get("ConnectionType")
                         .and_then(|v| v.as_string())
-                        .unwrap_or("USB");
+                        .unwrap_or("Unknown");
                     let transport = DeviceTransport::from_usbmux(connection_type);
 
                     let mut props_binary = Vec::new();
@@ -204,13 +213,16 @@ pub fn list_connected_devices() -> Result<Vec<DeviceInfo>> {
     let mut result = Vec::new();
 
     for entry in entries {
+        if entry.transport != DeviceTransport::Usb {
+            continue;
+        }
         let cf_props = libs.create_cf_plist_from_bytes(&entry.properties_plist)?;
         let dev = unsafe { (libs.am_device_create_from_properties)(cf_props.raw) };
         if dev.is_null() {
             continue;
         }
 
-        let mut name = "iPhone".to_string();
+        let name = "iPhone".to_string();
         let mut product_type = "iPhone".to_string();
         let mut ios_version = "Unknown".to_string();
         let mut build_version = "Unknown".to_string();
@@ -220,13 +232,6 @@ pub fn list_connected_devices() -> Result<Vec<DeviceInfo>> {
             if connected {
                 let _ = (libs.am_device_validate_pairing)(dev);
 
-                if let Ok(k) = libs.create_cf_string("DeviceName") {
-                    let v = (libs.am_device_copy_value)(dev, ptr::null(), k.raw);
-                    if !v.is_null() {
-                        name = libs.to_rust_string(v);
-                        (libs.cf_release)(v);
-                    }
-                }
                 if let Ok(k) = libs.create_cf_string("ProductType") {
                     let v = (libs.am_device_copy_value)(dev, ptr::null(), k.raw);
                     if !v.is_null() {
@@ -253,14 +258,17 @@ pub fn list_connected_devices() -> Result<Vec<DeviceInfo>> {
             (libs.cf_release)(dev);
         }
 
-        merge_device_info(&mut result, DeviceInfo {
-            udid: entry.udid,
-            name,
-            product_type,
-            ios_version,
-            build_version,
-            transports: vec![entry.transport],
-        });
+        merge_device_info(
+            &mut result,
+            DeviceInfo {
+                udid: entry.udid,
+                name,
+                product_type,
+                ios_version,
+                build_version,
+                transports: vec![entry.transport],
+            },
+        );
     }
 
     Ok(result)
@@ -276,7 +284,9 @@ fn merge_device_info(devices: &mut Vec<DeviceInfo>, incoming: DeviceInfo) {
                 existing.transports.push(transport);
             }
         }
-        existing.transports.sort_by_key(|transport| transport_priority(*transport));
+        existing
+            .transports
+            .sort_by_key(|transport| transport_priority(*transport));
 
         if existing.name == "iPhone" && incoming.name != "iPhone" {
             existing.name = incoming.name;
@@ -319,22 +329,17 @@ fn ordered_candidates(
     entries
 }
 
-pub fn ensure_transport_available(
-    udid: &str,
-    transport: DeviceTransport,
-) -> Result<()> {
-    let available = query_usbmux_devices()?.into_iter().any(|entry| {
-        entry.udid.eq_ignore_ascii_case(udid) && entry.transport == transport
-    });
+pub fn ensure_transport_available(udid: &str, transport: DeviceTransport) -> Result<()> {
+    let entries = query_usbmux_devices()?;
+    ensure_usb_only_entries(&entries, udid)?;
+    let available = entries
+        .into_iter()
+        .any(|entry| entry.udid.eq_ignore_ascii_case(udid) && entry.transport == transport);
     if available {
         return Ok(());
     }
 
-    bail!(
-        "iPhone {} is no longer available over {}. Refresh devices and reconnect before retrying.",
-        udid,
-        transport.label()
-    )
+    bail!("USB iPhone is no longer available. Reconnect the cable and refresh.")
 }
 
 #[allow(dead_code)]
@@ -367,13 +372,13 @@ impl ActiveDeviceSession {
     pub fn open(target_udid: Option<&str>, mode: ConnectionMode) -> Result<Self> {
         let libs = get_apple_libraries()?;
         let entries = query_usbmux_devices()?;
+        if let Some(target) = target_udid {
+            ensure_usb_only_entries(&entries, target)?;
+        }
         let candidates = ordered_candidates(entries, target_udid, mode);
         if candidates.is_empty() {
-            let target = target_udid.unwrap_or("any paired iPhone");
             bail!(
-                "No {} connection is available for {}. For WiFi, pair once over USB, enable WiFi sync, then keep both devices on the same network.",
-                mode.label(),
-                target
+                "No USB iPhone connection. Connect a cable, unlock the iPhone and trust this computer."
             );
         }
 
@@ -410,7 +415,9 @@ impl ActiveDeviceSession {
                 if transport == DeviceTransport::Wifi {
                     (libs.am_device_disconnect)(device);
                     (libs.cf_release)(device);
-                    bail!("WiFi device is not paired. Connect it over USB once and trust this computer first");
+                    bail!(
+                        "WiFi device is not paired. Connect it over USB once and trust this computer first"
+                    );
                 }
                 (libs.am_device_pair)(device);
             }
@@ -449,6 +456,7 @@ impl ActiveDeviceSession {
     }
 
     pub fn start_service(&self, service_name: &str) -> Result<AMDServiceConnectionRef> {
+        ensure_transport_available(&self.udid, DeviceTransport::Usb)?;
         let cf_name = self.libs.create_cf_string(service_name)?;
         let mut service_conn: AMDServiceConnectionRef = ptr::null_mut();
         let status = unsafe {
@@ -460,99 +468,71 @@ impl ActiveDeviceSession {
             )
         };
         if status != 0 || service_conn.is_null() {
-            bail!("AMDeviceSecureStartService('{}') failed with code {}", service_name, status);
+            bail!(
+                "AMDeviceSecureStartService('{}') failed with code {}",
+                service_name,
+                status
+            );
         }
         Ok(service_conn)
     }
 }
 
+fn ensure_usb_only_entries(entries: &[UsbmuxDeviceEntry], udid: &str) -> Result<()> {
+    let matching: Vec<_> = entries
+        .iter()
+        .filter(|e| e.udid.eq_ignore_ascii_case(udid))
+        .collect();
+    let usb = matching.iter().any(|e| e.transport == DeviceTransport::Usb);
+    let other = matching.iter().any(|e| e.transport != DeviceTransport::Usb);
+    anyhow::ensure!(
+        crate::safety::usb_route_allowed(usb, other),
+        "USB-only route cannot be confirmed. Disable Wi-Fi sync in Apple Devices/iTunes, connect USB and refresh."
+    );
+    Ok(())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn entry(udid: &str, transport: DeviceTransport) -> UsbmuxDeviceEntry {
+    fn entry(t: DeviceTransport) -> UsbmuxDeviceEntry {
         UsbmuxDeviceEntry {
-            udid: udid.to_string(),
-            transport,
-            properties_plist: Vec::new(),
+            udid: "phone".into(),
+            transport: t,
+            properties_plist: vec![],
         }
     }
-
     #[test]
-    fn test_connection_mode_candidate_order() {
-        let entries = vec![
-            entry("phone", DeviceTransport::Wifi),
-            entry("other", DeviceTransport::Usb),
-            entry("phone", DeviceTransport::Usb),
-        ];
-
-        let auto = ordered_candidates(entries.clone(), Some("phone"), ConnectionMode::Auto);
-        assert_eq!(auto.len(), 2);
-        assert_eq!(auto[0].transport, DeviceTransport::Usb);
-        assert_eq!(auto[1].transport, DeviceTransport::Wifi);
-
-        let wifi = ordered_candidates(entries, Some("phone"), ConnectionMode::Wifi);
-        assert_eq!(wifi.len(), 1);
-        assert_eq!(wifi[0].transport, DeviceTransport::Wifi);
-    }
-
-    #[test]
-    fn test_merge_device_transports() {
-        let mut devices = vec![DeviceInfo {
-            udid: "phone".to_string(),
-            name: "iPhone".to_string(),
-            product_type: "iPhone".to_string(),
-            ios_version: "Unknown".to_string(),
-            build_version: "Unknown".to_string(),
-            transports: vec![DeviceTransport::Wifi],
-        }];
-
-        merge_device_info(
-            &mut devices,
-            DeviceInfo {
-                udid: "PHONE".to_string(),
-                name: "LeeSa's iPhone".to_string(),
-                product_type: "iPhone17,1".to_string(),
-                ios_version: "18.6".to_string(),
-                build_version: "22G86".to_string(),
-                transports: vec![DeviceTransport::Usb],
-            },
+    fn usb_selection_never_falls_back_to_network() {
+        assert!(
+            ordered_candidates(
+                vec![entry(DeviceTransport::Wifi)],
+                Some("phone"),
+                ConnectionMode::Usb
+            )
+            .is_empty()
         );
-
-        assert_eq!(devices.len(), 1);
-        assert_eq!(devices[0].name, "LeeSa's iPhone");
+        assert!(ensure_usb_only_entries(&[entry(DeviceTransport::Usb)], "phone").is_ok());
+        assert!(
+            ensure_usb_only_entries(
+                &[entry(DeviceTransport::Usb), entry(DeviceTransport::Wifi)],
+                "phone"
+            )
+            .is_err()
+        );
         assert_eq!(
-            devices[0].transports,
-            vec![DeviceTransport::Usb, DeviceTransport::Wifi]
+            DeviceTransport::from_usbmux("Unknown"),
+            DeviceTransport::Other
         );
     }
-
     #[test]
-    fn test_usbmux_query() {
-        match query_usbmux_devices() {
-            Ok(devs) => {
-                println!("Detected {} usbmux device(s)", devs.len());
-                if !devs.is_empty() {
-                    println!("Detected usbmux device: {}", devs[0].udid);
-                }
-            }
-            Err(e) => {
-                println!("usbmuxd not running on this host (expected in CI): {e}");
-            }
-        }
-    }
-
-    #[test]
-    fn test_list_connected_devices() {
-        match list_connected_devices() {
-            Ok(devs) => {
-                for d in &devs {
-                    println!("Connected iPhone: {}", d);
-                }
-            }
-            Err(e) => {
-                println!("Apple Mobile Device Support not installed on this host (expected in CI): {e}");
-            }
-        }
+    #[ignore = "Requires physical iPhone and Apple USB drivers"]
+    fn physical_usb_enumeration() {
+        let devices = list_connected_devices().expect("Apple service");
+        assert!(!devices.is_empty(), "A physical USB iPhone is required");
+        assert!(
+            devices
+                .iter()
+                .all(|d| d.transports == vec![DeviceTransport::Usb])
+        );
     }
 }

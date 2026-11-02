@@ -1,188 +1,174 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use crate::{afc::AfcClient, crypto, safety};
+use anyhow::{Context, Result, bail, ensure};
+use serde::{Deserialize, Serialize};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::Path;
 
-use anyhow::{Context, Result, bail};
-
-use crate::afc::AfcClient;
-use crate::device::{ActiveDeviceSession, ConnectionMode};
-
-pub const CARD_ARTWORK_ASSETS: [&str; 3] = [
-    "cardBackgroundCombined@3x.png",
-    "cardBackgroundCombined@2x.png",
-    "cardBackgroundCombined.pdf",
-];
-
-fn backup_root() -> PathBuf {
-    let local_app_data = std::env::var("LOCALAPPDATA")
-        .unwrap_or_else(|_| r"C:\Users\Default\AppData\Local".to_string());
-    PathBuf::from(local_app_data)
-        .join("AirCard")
-        .join("wallet-backups")
+#[derive(Serialize, Deserialize)]
+struct Manifest {
+    version: u32,
+    // Pseudonymous linkage, no raw UDID, card hash, name or syslog.
+    binding: String,
+    digests: Vec<String>,
 }
-
-fn backup_dir(udid: &str, card_hash: &str) -> PathBuf {
-    backup_root().join(format!(
-        "{}-{}",
-        safe_component(udid),
-        stable_hash(card_hash)
-    ))
+fn binding(udid: &str, card: &str) -> Result<String> {
+    crypto::sha256(
+        format!(
+            "AirCard-Safe-v1\0{}\0{}",
+            udid.to_ascii_lowercase(),
+            card.trim_end_matches('=')
+        )
+        .as_bytes(),
+    )
 }
-
-fn safe_component(value: &str) -> String {
-    let component: String = value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if component.is_empty() {
-        "unknown".to_string()
-    } else {
-        component
-    }
+fn save_new(path: &Path, data: &[u8]) -> Result<()> {
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(path)
+        .context(
+            "Backup file already exists or folder is not writable; select a new empty folder",
+        )?;
+    file.write_all(data)?;
+    file.sync_all()?;
+    safety::verify_bytes(data, &fs::read(path)?).map_err(anyhow::Error::msg)
 }
-
-fn stable_hash(value: &str) -> String {
-    let mut hash = 0xcbf29ce484222325u64;
-    for byte in value.as_bytes() {
-        hash ^= *byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("{hash:016x}")
-}
-
-pub fn backup_exists(udid: &str, card_hash: &str) -> bool {
-    let dir = backup_dir(udid, card_hash);
-    CARD_ARTWORK_ASSETS
-        .iter()
-        .any(|asset| dir.join(asset).is_file())
-}
-
-fn card_hash_candidates(card_hash: &str) -> Vec<String> {
-    let trimmed = card_hash.trim_end_matches('=');
-    let mut candidates = vec![card_hash.to_string(), trimmed.to_string()];
-    if !trimmed.is_empty() {
-        candidates.push(format!("{trimmed}="));
-        candidates.push(format!("{trimmed}=="));
-    }
-    candidates.dedup();
-    candidates
-}
-
-fn find_device_card_hash(afc: &AfcClient, card_hash: &str) -> Result<Option<String>> {
-    for candidate in card_hash_candidates(card_hash) {
-        let pkpass_dir = format!("/var/mobile/Library/Passes/Cards/{candidate}.pkpass");
-        if afc.exists(&pkpass_dir) {
-            return Ok(Some(candidate));
-        }
-    }
-    Ok(None)
-}
-
-pub fn capture_original_card<L>(
-    udid: &str,
-    connection_mode: ConnectionMode,
-    card_hash: &str,
-    mut log: L,
-) -> Result<Option<String>>
-where
-    L: FnMut(&str),
-{
-    let dir = backup_dir(udid, card_hash);
-    fs::create_dir_all(&dir)
-        .with_context(|| format!("Could not create backup directory {}", dir.display()))?;
-
-    log("Checking for an existing original Wallet card face backup...");
-    let session = ActiveDeviceSession::open(Some(udid), connection_mode)
-        .context("Failed to open device session for original card backup")?;
-    let afc = AfcClient::new(&session).context("Failed to open AFC for original card backup")?;
-    let resolved_hash = match find_device_card_hash(&afc, card_hash)? {
-        Some(hash) => hash,
-        None if backup_exists(udid, card_hash) => {
-            log("Original backup exists, but the current Wallet card directory is not visible.");
-            return Ok(Some(card_hash.to_string()));
-        }
-        None => {
-            log(&format!(
-                "Wallet card directory not found for hash {} (also tried padded/unpadded variants); continuing without an original backup.",
-                card_hash
-            ));
-            return Ok(None);
-        }
-    };
-    if resolved_hash != card_hash {
-        log(&format!(
-            "Using device Wallet card hash variant {} for the card path.",
-            resolved_hash
-        ));
-    }
-    let pkpass_dir = format!("/var/mobile/Library/Passes/Cards/{}.pkpass", resolved_hash);
-    let mut available_assets = 0;
-
-    for asset in CARD_ARTWORK_ASSETS {
-        let backup_path = dir.join(asset);
-        if backup_path.is_file() {
-            available_assets += 1;
-            log(&format!("Original backup already contains {}", asset));
-            continue;
-        }
-
-        let device_path = format!("{pkpass_dir}/{asset}");
-        if !afc.exists(&device_path) {
-            log(&format!("Original card asset not present on device: {}", asset));
-            continue;
-        }
-
-        let data = afc
-            .read_file(&device_path)
-            .with_context(|| format!("Failed to read original card asset {}", asset))?;
-        write_backup_file(&backup_path, &data)
-            .with_context(|| format!("Failed to save original card asset {}", asset))?;
-        available_assets += 1;
-        log(&format!("Backed up original card asset: {}", asset));
-    }
-
-    if available_assets == 0 {
-        log("Original Wallet card directory exists, but no backup artwork assets are available; continuing without a restore backup.");
-    }
-
-    Ok(Some(resolved_hash))
-}
-
-pub fn load_original_assets(
-    udid: &str,
-    card_hash: &str,
-) -> Result<Vec<(String, Vec<u8>)>> {
-    let dir = backup_dir(udid, card_hash);
+pub fn load_original_assets(root: &Path, udid: &str, card: &str) -> Result<Vec<(String, Vec<u8>)>> {
+    ensure!(
+        safety::valid_card_component(card),
+        "Invalid card identifier"
+    );
+    ensure!(
+        fs::metadata(root.join("backup.json"))?.len() < 4096,
+        "Backup manifest too large"
+    );
+    let manifest: Manifest = serde_json::from_slice(&fs::read(root.join("backup.json"))?)?;
+    ensure!(
+        manifest.version == 1 && manifest.binding == binding(udid, card)?,
+        "Backup belongs to another card/device or has an unsupported format"
+    );
+    ensure!(manifest.digests.len() == 3, "Backup is incomplete");
     let mut assets = Vec::new();
-
-    for asset in CARD_ARTWORK_ASSETS {
-        let path = dir.join(asset);
-        if !path.is_file() {
-            continue;
-        }
-        let data = fs::read(&path)
-            .with_context(|| format!("Could not read backup file {}", path.display()))?;
-        assets.push((asset.to_string(), data));
+    for (index, leaf) in safety::ARTWORK.iter().enumerate() {
+        let path = root.join(leaf);
+        ensure!(
+            fs::metadata(&path)?.len() <= 32 * 1024 * 1024,
+            "Backup artwork too large"
+        );
+        let data = fs::read(path)?;
+        ensure!(
+            !data.is_empty() && crypto::sha256(&data)? == manifest.digests[index],
+            "Backup artwork failed SHA-256 verification"
+        );
+        validate_artwork(leaf, &data)?;
+        assets.push((leaf.to_string(), data));
     }
-
-    if assets.is_empty() {
-        bail!("Original card face backup not found for card hash {}", card_hash);
-    }
-
     Ok(assets)
 }
-
-fn write_backup_file(path: &Path, data: &[u8]) -> Result<()> {
-    let temporary = path.with_extension("tmp");
-    fs::write(&temporary, data)?;
-    if path.exists() {
-        fs::remove_file(path)?;
+fn validate_artwork(leaf: &str, bytes: &[u8]) -> Result<()> {
+    if leaf.ends_with(".png") {
+        ensure!(
+            bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+            "Original artwork is not a PNG"
+        );
+    } else {
+        ensure!(bytes.starts_with(b"%PDF-"), "Original artwork is not a PDF");
     }
-    fs::rename(temporary, path)?;
     Ok(())
+}
+pub fn capture_original_card(
+    afc: &AfcClient,
+    root: &Path,
+    udid: &str,
+    card: &str,
+) -> Result<String> {
+    ensure!(
+        safety::valid_card_component(card),
+        "Invalid card identifier"
+    );
+    let raw = card.trim_end_matches('=');
+    let variants = [card.to_string(), raw.to_string(), format!("{raw}=")];
+    let resolved = variants.iter().find(|v| afc.exists(&format!("/var/mobile/Library/Passes/Cards/{v}.pkpass")))
+        .context("Wallet artwork is not readable over AFC. No backup can be verified; writing is blocked.")?.to_string();
+    let dir = format!("/var/mobile/Library/Passes/Cards/{resolved}.pkpass");
+    if root.join("backup.json").is_file() {
+        let assets = load_original_assets(root, udid, &resolved)?;
+        // Do not mix an old backup with a different current card state.
+        for (leaf, expected) in assets {
+            let actual = afc.read_file(&format!("{dir}/{leaf}"))?;
+            safety::verify_bytes(&expected, &actual).map_err(anyhow::Error::msg)
+                .context("Current artwork differs from this backup. Restore it first, or capture current artwork to a new empty folder.")?;
+        }
+        return Ok(resolved);
+    }
+    fs::create_dir_all(root)?;
+    if fs::read_dir(root)?.next().is_some() {
+        bail!(
+            "Select an empty backup folder. Incomplete backups are never overwritten automatically."
+        );
+    }
+    let mut digests = Vec::new();
+    // Read all original files twice before any local or device modification.
+    let mut originals = Vec::new();
+    for leaf in safety::ARTWORK {
+        let path = format!("{dir}/{leaf}");
+        let bytes = afc
+            .read_file(&path)
+            .context("Could not read all three original artwork files; write blocked")?;
+        validate_artwork(leaf, &bytes)?;
+        safety::verify_bytes(&bytes, &afc.read_file(&path)?).map_err(anyhow::Error::msg)?;
+        originals.push((leaf, bytes));
+    }
+    for (leaf, bytes) in originals {
+        save_new(&root.join(leaf), &bytes)?;
+        digests.push(crypto::sha256(&bytes)?);
+    }
+    let manifest = Manifest {
+        version: 1,
+        binding: binding(udid, &resolved)?,
+        digests,
+    };
+    // Commit marker written last; interrupted backups cannot be loaded as complete.
+    save_new(
+        &root.join("backup.json"),
+        &serde_json::to_vec_pretty(&manifest)?,
+    )?;
+    load_original_assets(root, udid, &resolved)?;
+    Ok(resolved)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn backup_rejects_incomplete_tampered_and_other_device() {
+        let dir = std::env::temp_dir().join(format!("aircard-test-{}", crypto::token().unwrap()));
+        fs::create_dir(&dir).unwrap();
+        let card = "OM6NYhwXMZrAw0sRUjR62wmF4ZQ=";
+        assert!(load_original_assets(&dir, "phone", card).is_err());
+        let bytes: [&[u8]; 3] = [
+            b"\x89PNG\r\n\x1a\nexample-a",
+            b"\x89PNG\r\n\x1a\nexample-b",
+            b"%PDF-example",
+        ];
+        for (leaf, data) in safety::ARTWORK.iter().zip(bytes) {
+            fs::write(dir.join(leaf), data).unwrap();
+        }
+        let manifest = Manifest {
+            version: 1,
+            binding: binding("phone", card).unwrap(),
+            digests: bytes.iter().map(|b| crypto::sha256(b).unwrap()).collect(),
+        };
+        fs::write(
+            dir.join("backup.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(load_original_assets(&dir, "phone", card).unwrap().len(), 3);
+        assert!(load_original_assets(&dir, "other-phone", card).is_err());
+        fs::write(dir.join(safety::ARTWORK[0]), b"changed").unwrap();
+        assert!(load_original_assets(&dir, "phone", card).is_err());
+        // Generated test fixture folder, no user input.
+        fs::remove_dir_all(dir).unwrap();
+    }
 }
