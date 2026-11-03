@@ -4,6 +4,8 @@ Experimental native Windows application for customizing Apple Wallet artwork.
 Independent MIT-licensed modification of [Lumid-Off/AirCard-Windows](https://github.com/Lumid-Off/AirCard-Windows).
 **No physical iPhone test has been performed.**
 
+**Known functional blocker:** the current build uses ordinary `com.apple.afc`, whose root is the iPhone's Media directory, to read protected Wallet artwork outside that directory. This cannot provide the required backup on stock iOS. A successful Windows build does not resolve this architectural error. The reported "Wallet artwork is not readable over AFC" stops applying before artwork writes. See [access review](docs/ACCESS-REVIEW.md). There is currently no verified working customization path on an unmodified iPhone.
+
 ## Download and run
 
 Open this repository's Actions tab and select a successful **AirCard Safe Windows** run.
@@ -37,7 +39,7 @@ To restore, detect the same card, select its existing verified backup folder, ac
 - Backups contain artwork, SHA-256 digests and a pseudonymous device/card binding. Protect these files.
 - Scanning stops after two minutes. Images are limited to 20 MiB, 8192 pixels per dimension and a 128 MiB decoding allocation limit.
 - All three original artwork files must be readable twice consistently, saved locally, read back and verified before applying.
-- **Stock iOS may prevent reading Wallet artwork over AFC. Safe then refuses to write.** There is no unsafe bypass.
+- **Ordinary AFC cannot expose the protected Wallet artwork on stock iOS. The current backup path is therefore blocked.** There is no unsafe bypass.
 - Captured artwork is the current appearance; it is not guaranteed to be the factory original.
 - Incomplete, changed or wrong-device backups are rejected. Existing backup files are never silently overwritten.
 - Destination artwork and the tracked Books files are read back. This does not prove a visual refresh or preserve the entire Books application state.
@@ -58,3 +60,4 @@ The package identity remains `aircard 1.2.4` to preserve upstream Cargo.lock; th
 Static CRT is requested in .cargo/config.toml. LICENSE is retained unchanged.
 Pinned upstream revision: `88131e301c88fd9238cbeff9d091967c3ddbf10f`.
 Credits: Lumid-Off (Windows), mak5er (original application), 0xjohnnydev/airlift (underlying research).
+

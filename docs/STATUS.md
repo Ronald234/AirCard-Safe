@@ -1,4 +1,4 @@
-# AirCard Safe — verified Windows build
+# AirCard Safe - verified Windows build
 Built source commit: 19aa77fdcdcf6c54b45336c36f04e1db32bc114d
 Windows Actions run: https://github.com/Ronald234/AirCard-Safe/actions/runs/41551859987
 Executable SHA-256: 7056296e7302d68cc928b23cba0c0c2ade136ff7367aad79d49e12846dc5b430
@@ -28,7 +28,7 @@ The temporary lockfile resolver workflow was removed.
 No physical iPhone test was performed. No claim is made that artwork customization works on a real phone.
 Windows Server 2025 hosted CI is not a Windows 10/11 hardware certification.
 Apple Mobile Device Support and USB drivers must already be installed from official Apple software.
-Stock iOS may prevent reading the original Wallet artwork through AFC. Safe refuses to write in that situation.
+Confirmed architectural blocker: the current client opens ordinary com.apple.afc (Media root), but backup and destination verification try to read protected Wallet artwork outside that root. This is not a working backup/readback route on stock iOS. Safe blocks applying before artwork writes. See ACCESS-REVIEW.md; Windows build validation is not evidence of functional customization.
 The artwork backup is not a full-device backup, and captured current artwork is not necessarily factory-original.
 Writes and restore are not atomic; unplugging, terminating the process or power loss can leave partial changes.
 Tracked Books snapshots are in memory only. They do not preserve all Books state or survive a crash.
