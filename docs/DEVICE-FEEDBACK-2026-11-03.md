@@ -1,28 +1,18 @@
-# Reported device result: no visible artwork change
+# Static artwork compatibility limitations
 
-Follow-up: the original Mac README at `52ba05dca4bdc590672c19d554701f4438e20338` explicitly excludes Apple Card's dynamic vector-rendered face from static cached artwork. The current refresh/discovery corrections do not establish Apple Card support. See REFRESH-FIX.md. This report remains a record of the earlier failed user test.
+## Apple Card
 
-## Evidence and its limits
+The original Mac README at commit 52ba05dca4bdc590672c19d554701f4438e20338 states that Apple Card uses dynamic vector rendering instead of a static cached face. The refresh/discovery corrections do not establish Apple Card support. See REFRESH-FIX.md and the pinned upstream README:
+https://github.com/Mak5er/AirCard/blob/52ba05dca4bdc590672c19d554701f4438e20338/README.md
 
-- The user reports applying artwork to Apple Card without a visible change.
-- The user reports that existing gym/membership passes in Wallet are not detected.
-- The live Windows UI showed the current original-method build's unverified-transfer completion message. Its device selector showed `iPhone17,1`, iOS `27.0`.
-- This is a user-reported phone result plus an observed Windows UI state. The assistant did not inspect the phone screen, verify its protected files, perform an additional write or test payment/NFC operation.
+## Transfer versus visible result
 
-The reported outcome is a failed visual customization test. It must not be recorded as successful iPhone compatibility just because the Windows tests/build and transfer return value succeeded.
+A Book asset manifest and dispatched completion messages do not verify protected destination bytes or a visible Wallet refresh. The program reports an unverified transfer, never a proven visual result. The restored cache invalidation sequence fixes a source-level omission but is not guaranteed regeneration or restoration.
 
-## Confirmed source limitations
+## Membership and NFC passes
 
-1. The scanner accepts a narrow set of 20/32-byte cryptographic card identifier formats. It is not a general Wallet membership-pass enumerator. The writer only supports three bank-style artwork filenames under the Cards directory. Broadening a regular expression alone would not implement safe membership-pass customization.
-2. Upstream calls cache invalidation after artwork synchronization, writing invalid bytes to six cache leaves. That step was deliberately removed from this build. It can affect visible refresh, but its omission has not been proven to be the sole cause on this phone.
-3. The current AirTraffic helper checks a Book asset manifest, dispatches completion messages, waits two seconds and returns. This does not verify protected destination bytes or a Wallet refresh. The application correctly labels the result unverified.
+The native scanner can observe structured pass identifiers. It does not establish that a pass supports the payment-card artwork filenames. Untyped and incompatible observations remain read-only, including after later weaker observations for the same identifier. A discovered credential is not a cloned NFC key or proof of gym-access compatibility.
 
-## Reference observations
+## Public verification scope
 
-- [Upstream source](https://github.com/Lumid-Off/AirCard-Windows/blob/88131e301c88fd9238cbeff9d091967c3ddbf10f/src/flasher.rs): cache invalidation is part of the original visual-update sequence.
-- [Upstream issue 33](https://github.com/Lumid-Off/AirCard-Windows/issues/33): a contributor reports iOS 27.0 discovery through unified logs, with artwork/cache operations. This is not this project's physical validation and does not establish gym-pass compatibility.
-- [Upstream issue 64](https://github.com/Lumid-Off/AirCard-Windows/issues/64) and [issue 75](https://github.com/Lumid-Off/AirCard-Windows/issues/75): reports of completed operations without a visible result on other iOS versions, including a report with cache invalidation. Those reports do not prove the cause on this user's iOS 27.0 phone.
-
-## Pending
-
-Identify the gym pass type before changing the detector or write allowlist. There is no confirmed supported artwork target or verified restoration method for that pass. Do not claim a corrected gym-compatible executable or diagnose a definitive Apple Card cause without further evidence. No additional cache/protected-file modification was performed during this diagnosis.
+Current build/test results are documented in STATUS.md. Private manual-test observations and personal device metadata are not published here. The automated physical-device test remains explicitly ignored; no universal hardware-support claim is made.

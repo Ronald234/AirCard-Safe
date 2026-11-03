@@ -2,7 +2,7 @@
 
 Experimental native Windows application for customizing Apple Wallet artwork.
 Independent MIT-licensed modification of [Lumid-Off/AirCard-Windows](https://github.com/Lumid-Off/AirCard-Windows).
-**No physical iPhone test has been performed.**
+**Windows build validation:** the locked test suite, release build, executable checks and GitHub Actions artifact passed. This is not a guarantee of artwork, payment, restoration or gym-access compatibility. See [validation](docs/STATUS.md).
 
 **Apple Card is not supported by the original static-artwork method.** Its digital face uses dynamic vector rendering, as stated in the [original Mac project's pinned README](https://github.com/Mak5er/AirCard/blob/52ba05dca4bdc590672c19d554701f4438e20338/README.md). This revision does not claim to fix Apple Card. Explicit Apple Card log context is classified read-only; opaque identifiers do not reliably reveal issuer/type, so the UI also requires the user to confirm the selected card is not Apple Card or an NFC membership credential.
 
@@ -10,7 +10,7 @@ Independent MIT-licensed modification of [Lumid-Off/AirCard-Windows](https://git
 
 ## Download and run
 
-Open this repository's Actions tab and select a successful **AirCard Safe Windows** run.
+Open the [verified revision 3 artifact](https://github.com/Ronald234/AirCard-Safe/actions/runs/41650863325/artifacts/13236984039), or use the Actions tab and select the successful revision 3 **AirCard Safe Windows** run.
 Download **AirCard-Safe-Windows-x64**, extract it, and open **AirCard-Safe.exe**.
 GitHub may require sign-in to download an artifact. Artifacts expire after 30 days.
 
