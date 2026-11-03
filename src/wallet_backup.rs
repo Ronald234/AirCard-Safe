@@ -1,8 +1,7 @@
-use crate::{afc::AfcClient, crypto, safety};
-use anyhow::{Context, Result, bail, ensure};
+use crate::{crypto, safety};
+use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::Path;
 
 #[derive(Serialize, Deserialize)]
@@ -21,18 +20,6 @@ fn binding(udid: &str, card: &str) -> Result<String> {
         )
         .as_bytes(),
     )
-}
-fn save_new(path: &Path, data: &[u8]) -> Result<()> {
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)
-        .context(
-            "Backup file already exists or folder is not writable; select a new empty folder",
-        )?;
-    file.write_all(data)?;
-    file.sync_all()?;
-    safety::verify_bytes(data, &fs::read(path)?).map_err(anyhow::Error::msg)
 }
 pub fn load_original_assets(root: &Path, udid: &str, card: &str) -> Result<Vec<(String, Vec<u8>)>> {
     ensure!(
@@ -76,66 +63,6 @@ fn validate_artwork(leaf: &str, bytes: &[u8]) -> Result<()> {
         ensure!(bytes.starts_with(b"%PDF-"), "Original artwork is not a PDF");
     }
     Ok(())
-}
-pub fn capture_original_card(
-    afc: &AfcClient,
-    root: &Path,
-    udid: &str,
-    card: &str,
-) -> Result<String> {
-    ensure!(
-        safety::valid_card_component(card),
-        "Invalid card identifier"
-    );
-    let raw = card.trim_end_matches('=');
-    let variants = [card.to_string(), raw.to_string(), format!("{raw}=")];
-    let resolved = variants.iter().find(|v| afc.exists(&format!("/var/mobile/Library/Passes/Cards/{v}.pkpass")))
-        .context("Wallet artwork is not readable over AFC. No backup can be verified; writing is blocked.")?.to_string();
-    let dir = format!("/var/mobile/Library/Passes/Cards/{resolved}.pkpass");
-    if root.join("backup.json").is_file() {
-        let assets = load_original_assets(root, udid, &resolved)?;
-        // Do not mix an old backup with a different current card state.
-        for (leaf, expected) in assets {
-            let actual = afc.read_file(&format!("{dir}/{leaf}"))?;
-            safety::verify_bytes(&expected, &actual).map_err(anyhow::Error::msg)
-                .context("Current artwork differs from this backup. Restore it first, or capture current artwork to a new empty folder.")?;
-        }
-        return Ok(resolved);
-    }
-    fs::create_dir_all(root)?;
-    if fs::read_dir(root)?.next().is_some() {
-        bail!(
-            "Select an empty backup folder. Incomplete backups are never overwritten automatically."
-        );
-    }
-    let mut digests = Vec::new();
-    // Read all original files twice before any local or device modification.
-    let mut originals = Vec::new();
-    for leaf in safety::ARTWORK {
-        let path = format!("{dir}/{leaf}");
-        let bytes = afc
-            .read_file(&path)
-            .context("Could not read all three original artwork files; write blocked")?;
-        validate_artwork(leaf, &bytes)?;
-        safety::verify_bytes(&bytes, &afc.read_file(&path)?).map_err(anyhow::Error::msg)?;
-        originals.push((leaf, bytes));
-    }
-    for (leaf, bytes) in originals {
-        save_new(&root.join(leaf), &bytes)?;
-        digests.push(crypto::sha256(&bytes)?);
-    }
-    let manifest = Manifest {
-        version: 1,
-        binding: binding(udid, &resolved)?,
-        digests,
-    };
-    // Commit marker written last; interrupted backups cannot be loaded as complete.
-    save_new(
-        &root.join("backup.json"),
-        &serde_json::to_vec_pretty(&manifest)?,
-    )?;
-    load_original_assets(root, udid, &resolved)?;
-    Ok(resolved)
 }
 #[cfg(test)]
 mod tests {

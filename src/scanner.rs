@@ -1,10 +1,89 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use regex::Regex;
 
-use crate::device::{ActiveDeviceSession, ConnectionMode};
+use crate::device::ConnectionMode;
+
+mod runtime;
+mod unified;
+
+pub use runtime::scan_wallet_items;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WalletItem {
+    PaymentCard(String),
+    UnsupportedPass(String),
+    CandidatePass(String),
+}
+
+fn extract_wallet_items(line: &str) -> Vec<WalletItem> {
+    static PATHS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+        r#"(?i)/(?:(?:var/mobile/Library/Passes/)?Cards)/([-A-Za-z0-9_+=]{20,128})(?:\.(?:pkpass|cache|pkcache))?(?:[/\s"'),]|$)"#
+    ).unwrap()
+    });
+    static SELECTED: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+        r#"(?i)(?:selected pass uniqueID\s*:\s*|PDCardFileManager:\s*writing card\s+|PDPassLibrary:\s*wrote pass\s+|VerificationCheck\.)(?:")?([-A-Za-z0-9_+=]{20,128})(?:[\s"'),]|$)"#
+    ).unwrap()
+    });
+    static IN_SESSION: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)passIDs\[InSession\]\s*:\s*(?:\{\s*)?\(([^)]{0,8192})\)"#).unwrap()
+    });
+    static LIST_ID: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#""([-A-Za-z0-9_+=]{20,128})""#).unwrap());
+    static MEMBERSHIP_CONTEXT: LazyLock<Regex> = LazyLock::new(|| {
+        // Field/layout evidence must be outside an opaque identifier. An ID
+        // containing "membership" is not itself evidence of a pass layout.
+        Regex::new(r#"(?i)(?:^|[\s:("'])(?:membership|storecard|generic pass|boardingpass|eventticket|coupon|apple card|applecard)(?:[\s:),"']|$)|"generic"\s*:|/(?:thumbnail|strip|artwork)(?:@[23]x)?\.png(?:[\s"'),]|$)"#).unwrap()
+    });
+    if line.len() > 128 * 1024 {
+        return Vec::new();
+    }
+    let lower = line.to_lowercase();
+    if !WALLET_KEYWORDS.iter().any(|key| lower.contains(key)) {
+        return Vec::new();
+    }
+    let membership = MEMBERSHIP_CONTEXT.is_match(line);
+    let mut result = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for capture in PATHS.captures_iter(line) {
+        let id = &capture[1];
+        if seen.insert(id.to_string()) {
+            result.push(if !membership && is_valid_card_hash(id) {
+                WalletItem::PaymentCard(id.into())
+            } else {
+                WalletItem::UnsupportedPass(id.into())
+            });
+        }
+    }
+    for capture in SELECTED.captures_iter(line) {
+        let id = &capture[1];
+        if seen.insert(id.to_string()) {
+            result.push(if membership {
+                WalletItem::UnsupportedPass(id.into())
+            } else {
+                WalletItem::CandidatePass(id.into())
+            });
+        }
+    }
+    // Express-mode global configuration is stale-capable and is never inventory.
+    for list in IN_SESSION.captures_iter(line) {
+        for capture in LIST_ID.captures_iter(&list[1]) {
+            let id = &capture[1];
+            if seen.insert(id.to_string()) {
+                result.push(if membership {
+                    WalletItem::UnsupportedPass(id.into())
+                } else {
+                    WalletItem::CandidatePass(id.into())
+                });
+            }
+        }
+    }
+    result
+}
 
 #[cfg(windows)]
 unsafe extern "system" {
@@ -31,13 +110,6 @@ pub fn is_valid_card_hash(h: &str) -> bool {
     if !trimmed.chars().all(|c| {
         c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '-' || c == '_' || c == '='
     }) {
-        return false;
-    }
-
-    // Reject strings with multiple underscores or hyphens (typical of system asset/bundle names)
-    if trimmed.chars().filter(|&c| c == '_').count() > 1
-        || trimmed.chars().filter(|&c| c == '-').count() > 2
-    {
         return false;
     }
 
@@ -122,6 +194,10 @@ pub fn is_valid_card_hash(h: &str) -> bool {
 }
 
 const WALLET_KEYWORDS: &[&str] = &[
+    "pdcardfilemanager",
+    "pdpasslibrary",
+    "verificationcheck",
+    "nfcd",
     "passd",
     "passbook",
     "passkit",
@@ -141,6 +217,7 @@ const DUMMY_HASHES: &[&str] = &[
 
 use std::sync::LazyLock;
 
+#[cfg(test)]
 static DESC_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"(?i)(?:description|localizedDescription|passName|title)\s*[:=]\s*['"]([^'"]+)['"]"#,
@@ -148,15 +225,17 @@ static DESC_RE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+#[cfg(test)]
 static CARD_REGEXES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
-        Regex::new(r"/(?:Cards|Passes/Cards)/([A-Za-z0-9+/_-]{27,44})(?:\.pkpass|\.cache|\.pkcache|/|\s|\x22|'|\)|,|$)").unwrap(),
-        Regex::new(r"/([A-Za-z0-9+/_-]{27,44})\.(?:pkpass|cache|pkcache)").unwrap(),
+        Regex::new(r"/(?:Cards|Passes/Cards)/([A-Za-z0-9+=_-]{27,44})(?:\.pkpass|\.cache|\.pkcache|/|\s|\x22|'|\)|,|$)").unwrap(),
+        Regex::new(r"/([A-Za-z0-9+=_-]{27,44})\.(?:pkpass|cache|pkcache)").unwrap(),
         Regex::new(r"(?:^|[^A-Za-z0-9+/_-])([A-Za-z0-9+/_-]{27}=)(?:$|[^A-Za-z0-9+/_-])").unwrap(),
         Regex::new(r"(?i)(?:card[_\s]?(?:hash|id)|pass[_\s]?(?:hash|id)|unique[_\s]?id)\s*[:=]\s*['\x22]?([A-Za-z0-9+=_-]{27,44})").unwrap(),
     ]
 });
 
+#[cfg(test)]
 pub fn extract_card_name_from_line(line: &str) -> Option<String> {
     if let Some(caps) = DESC_RE.captures(line) {
         if let Some(m) = caps.get(1) {
@@ -169,6 +248,7 @@ pub fn extract_card_name_from_line(line: &str) -> Option<String> {
     None
 }
 
+#[cfg(test)]
 pub fn extract_card_hash_from_line(line: &str) -> Option<String> {
     let lower = line.to_lowercase();
     let has_wallet = WALLET_KEYWORDS.iter().any(|k| lower.contains(k));
@@ -185,11 +265,9 @@ pub fn extract_card_hash_from_line(line: &str) -> Option<String> {
                     .trim_matches(['\'', '"'])
                     .trim_end_matches(['.', ',']);
                 if is_valid_card_hash(h) {
-                    let mut norm = h.to_string();
-                    if norm.len() == 27 {
-                        norm.push('=');
-                    }
-                    return Some(norm);
+                    // Base64 decoding may need padding; the device path must keep
+                    // the identifier exactly as observed, including its padding.
+                    return Some(h.to_string());
                 }
             }
         }
@@ -198,104 +276,147 @@ pub fn extract_card_hash_from_line(line: &str) -> Option<String> {
     None
 }
 
+#[allow(dead_code)]
 pub fn scan_syslog_for_cards<F, L>(
     udid: Option<&str>,
     connection_mode: ConnectionMode,
     stop_flag: Arc<AtomicBool>,
     mut on_card_found: F,
-    mut log: L,
+    log: L,
 ) -> Result<()>
 where
     F: FnMut(String, String),
     L: FnMut(String),
 {
-    log("Connecting to device session for syslog monitoring...".to_string());
-    let session = ActiveDeviceSession::open(udid, connection_mode)
-        .context("Failed to connect to device for syslog scanning")?;
-    log("Connected over USB.".to_string());
-    let libs = &session.libs;
-    log("Starting com.apple.syslog_relay service on device...".to_string());
-    let service_conn = session
-        .start_service("com.apple.syslog_relay")
-        .context("Failed to start com.apple.syslog_relay service")?;
-
-    let raw_socket = unsafe { (libs.amd_service_connection_get_socket)(service_conn) };
-    if raw_socket <= 0 {
-        unsafe { (libs.amd_service_connection_invalidate)(service_conn) };
-        anyhow::bail!("Invalid syslog socket");
-    }
-
-    // Set socket receive timeout
-    #[cfg(windows)]
-    unsafe {
-        let timeout_ms: u32 = 500;
-        let status = setsockopt(
-            raw_socket as usize,
-            SOL_SOCKET,
-            SO_RCVTIMEO,
-            &timeout_ms as *const u32 as *const i8,
-            std::mem::size_of::<u32>() as i32,
-        );
-        if status != 0 {
-            (libs.amd_service_connection_invalidate)(service_conn);
-            anyhow::bail!("Could not configure scanner timeout");
-        }
-    }
-
-    log("Syslog relay established. Listening for Wallet & PassKit events...".to_string());
-    log("Tip: Open Apple Wallet on your iPhone or tap your card to trigger events.".to_string());
-
-    let mut buffer = [0u8; 8192];
-    let mut line_acc = Vec::with_capacity(1024);
-
-    let started = std::time::Instant::now();
-    while !stop_flag.load(Ordering::Relaxed)
-        && started.elapsed() < std::time::Duration::from_secs(120)
-    {
-        let bytes_read = unsafe {
-            (libs.amd_service_connection_receive)(service_conn, buffer.as_mut_ptr(), buffer.len())
-        };
-
-        if bytes_read > 0 {
-            let slice = &buffer[..bytes_read as usize];
-            for &b in slice {
-                if b == b'\n' || b == b'\0' {
-                    if !line_acc.is_empty() {
-                        let line = String::from_utf8_lossy(&line_acc);
-                        if let Some(hash) = extract_card_hash_from_line(&line) {
-                            let name = String::new();
-                            on_card_found(hash, name);
-                        }
-                        line_acc.clear();
-                    }
-                } else if b != b'\r' {
-                    if line_acc.len() < 16 * 1024 {
-                        line_acc.push(b);
-                    } else {
-                        line_acc.clear();
-                    }
-                }
+    scan_wallet_items(
+        udid,
+        connection_mode,
+        stop_flag,
+        |item| {
+            if let WalletItem::PaymentCard(id) = item {
+                on_card_found(id, String::new());
             }
-        } else if bytes_read == 0 {
-            log("Syslog socket closed by device.".to_string());
-            break; // Socket closed
-        } else {
-            // Timeout or transient: sleep briefly to avoid pegging CPU
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-    }
-
-    unsafe {
-        (libs.amd_service_connection_invalidate)(service_conn);
-    }
-    log("Syslog scan stopped.".to_string());
-
-    Ok(())
+        },
+        log,
+    )
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wallet_discovery_returns_all_concrete_card_paths() {
+        let line = "passd: /var/mobile/Library/Passes/Cards/4FD0Y4djT-oIj--0Odq8GMLVpVo.pkpass/a.png /var/mobile/Library/Passes/Cards/99YLTeI09ke_k64JqGdQ_F4Ho7k.cache/FrontFace";
+        assert_eq!(
+            extract_wallet_items(line),
+            vec![
+                WalletItem::PaymentCard("4FD0Y4djT-oIj--0Odq8GMLVpVo".into()),
+                WalletItem::PaymentCard("99YLTeI09ke_k64JqGdQ_F4Ho7k".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn selected_pass_is_candidate_without_explicit_membership_evidence() {
+        assert_eq!(
+            extract_wallet_items("nfcd: selected pass uniqueID : \"4FD0Y4djT-oIj--0Odq8GMLVpVo\""),
+            vec![WalletItem::CandidatePass(
+                "4FD0Y4djT-oIj--0Odq8GMLVpVo".into()
+            )]
+        );
+        assert_eq!(
+            extract_wallet_items("passd: selected pass uniqueID : \"gym-membership-123456789\""),
+            vec![WalletItem::CandidatePass("gym-membership-123456789".into())]
+        );
+    }
+
+    #[test]
+    fn structured_pass_events_are_read_only_without_a_process_prefix() {
+        for line in [
+            "PDCardFileManager: writing card gym-membership-123456789",
+            "PDPassLibrary: wrote pass gym-membership-123456789",
+            "VerificationCheck.gym-membership-123456789",
+        ] {
+            assert_eq!(
+                extract_wallet_items(line),
+                vec![WalletItem::CandidatePass("gym-membership-123456789".into())]
+            );
+        }
+    }
+
+    #[test]
+    fn express_global_configuration_and_bare_tokens_are_not_inventory() {
+        assert!(
+            extract_wallet_items("nfcd: passIDs[global]: {(\n\"4FD0Y4djT-oIj--0Odq8GMLVpVo\"\n)}")
+                .is_empty()
+        );
+        assert!(extract_wallet_items("passd: unrelated 4FD0Y4djT-oIj--0Odq8GMLVpVo").is_empty());
+        assert!(extract_wallet_items("nfcd: selected pass uniqueID : <private>").is_empty());
+        assert!(
+            extract_wallet_items("nfcd: selected pass uniqueID : \"../../private-pass-123456789\"")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn membership_paths_never_reach_payment_writer_classification() {
+        assert_eq!(
+            extract_wallet_items(
+                "passd: /var/mobile/Library/Passes/Cards/gym-membership-123456789.pkpass/thumbnail.png"
+            ),
+            vec![WalletItem::UnsupportedPass(
+                "gym-membership-123456789".into()
+            )]
+        );
+        assert_eq!(
+            extract_wallet_items(
+                "passd: membership /var/mobile/Library/Passes/Cards/4FD0Y4djT-oIj--0Odq8GMLVpVo.pkpass/thumbnail.png"
+            ),
+            vec![WalletItem::UnsupportedPass(
+                "4FD0Y4djT-oIj--0Odq8GMLVpVo".into()
+            )]
+        );
+    }
+
+    #[test]
+    fn explicit_apple_card_rendering_context_stays_read_only() {
+        for kind in ["Apple Card", "AppleCard"] {
+            let line = format!(
+                "passd: {kind}: /var/mobile/Library/Passes/Cards/OM6NYhwXMZrAw0sRUjR62wmF4ZQ=.pkpass/cardBackgroundCombined@3x.png"
+            );
+            assert_eq!(
+                extract_wallet_items(&line),
+                vec![WalletItem::UnsupportedPass(
+                    "OM6NYhwXMZrAw0sRUjR62wmF4ZQ=".into()
+                )]
+            );
+        }
+    }
+
+    #[test]
+    fn same_hash_keeps_explicit_membership_distinct_from_untyped_selection() {
+        let id = "4FD0Y4djT-oIj--0Odq8GMLVpVo";
+        assert_eq!(
+            extract_wallet_items(&format!(
+                "nfcd: membership selected pass uniqueID : \"{id}\""
+            )),
+            vec![WalletItem::UnsupportedPass(id.into())]
+        );
+        assert_eq!(
+            extract_wallet_items(&format!("nfcd: selected pass uniqueID : \"{id}\"")),
+            vec![WalletItem::CandidatePass(id.into())]
+        );
+        assert_eq!(
+            extract_wallet_items(&format!("nfcd: passIDs[InSession]: {{(\"{id}\")}}")),
+            vec![WalletItem::CandidatePass(id.into())]
+        );
+        assert_eq!(
+            extract_wallet_items(&format!(
+                "passd: /var/mobile/Library/Passes/Cards/{id}.pkpass"
+            )),
+            vec![WalletItem::PaymentCard(id.into())]
+        );
+    }
 
     #[test]
     fn test_extract_card_hash() {
@@ -308,7 +429,7 @@ mod tests {
         let line2 = "nanopassd: Accessing /var/mobile/Library/Passes/Cards/d64fKk0kyHWP11IWV2GRLud4XQk.pkpass";
         assert_eq!(
             extract_card_hash_from_line(line2),
-            Some("d64fKk0kyHWP11IWV2GRLud4XQk=".to_string())
+            Some("d64fKk0kyHWP11IWV2GRLud4XQk".to_string())
         );
 
         // Dummy/unrelated lines should be ignored
@@ -323,6 +444,19 @@ mod tests {
             extract_card_name_from_line(line),
             Some("Apple Card".to_string())
         );
+    }
+
+    #[test]
+    fn explicit_wallet_paths_preserve_padding_and_url_safe_characters() {
+        for hash in [
+            "OM6NYhwXMZrAw0sRUjR62wmF4ZQ=",
+            "d64fKk0kyHWP11IWV2GRLud4XQk",
+            "4FD0Y4djT-oIj--0Odq8GMLVpVo",
+            "99YLTeI09ke_k64JqGdQ_F4Ho7k",
+        ] {
+            let line = format!("passd: /var/mobile/Library/Passes/Cards/{hash}.pkpass");
+            assert_eq!(extract_card_hash_from_line(&line).as_deref(), Some(hash));
+        }
     }
 
     #[test]

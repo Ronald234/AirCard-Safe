@@ -25,9 +25,9 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1000.0, 640.0])
+            .with_inner_size([1080.0, 760.0])
             .with_min_inner_size([880.0, 560.0])
-            .with_title("AirCard Safe"),
+            .with_title("AirCard Safe - revision 3"),
         ..Default::default()
     };
 

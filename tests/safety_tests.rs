@@ -2,6 +2,105 @@
 mod safety;
 
 #[test]
+fn original_cache_refresh_is_scoped_to_the_selected_cards_six_cache_leaves() {
+    let card = "OM6NYhwXMZrAw0sRUjR62wmF4ZQ=";
+    let items = [
+        ("FrontFace", b"corrupted".as_slice()),
+        ("PlaceHolder", b"corrupted".as_slice()),
+        ("Preview", b"corrupted".as_slice()),
+    ];
+    assert_eq!(
+        safety::wallet_cache_target(card, safety::WalletBatchKind::Cache, &items).unwrap(),
+        format!("/var/mobile/Library/Passes/Cards/{card}.cache")
+    );
+    assert_eq!(
+        safety::wallet_cache_target(card, safety::WalletBatchKind::PkCache, &items).unwrap(),
+        format!("/var/mobile/Library/Passes/Cards/{card}.pkcache")
+    );
+    assert!(
+        safety::wallet_cache_target("../escape", safety::WalletBatchKind::Cache, &items).is_err()
+    );
+    assert!(safety::wallet_cache_target(card, safety::WalletBatchKind::Artwork, &items).is_err());
+    assert!(
+        safety::wallet_cache_target(card, safety::WalletBatchKind::Cache, &items[..2]).is_err()
+    );
+    let mut invalid = items;
+    invalid[0] = ("../pass.json", b"corrupted");
+    assert!(safety::wallet_cache_target(card, safety::WalletBatchKind::Cache, &invalid).is_err());
+    invalid[0] = ("FrontFace", b"arbitrary data");
+    assert!(safety::wallet_cache_target(card, safety::WalletBatchKind::Cache, &invalid).is_err());
+}
+
+#[test]
+fn successful_original_sequence_includes_both_refresh_batches_after_artwork() {
+    use safety::WalletBatchKind::*;
+    let mut submitted = Vec::new();
+    safety::run_wallet_sequence(|kind| {
+        submitted.push(kind);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(submitted, vec![Artwork, Cache, PkCache]);
+}
+
+#[test]
+fn failed_artwork_or_cache_stops_the_sequence_without_retrying() {
+    use safety::WalletBatchKind::*;
+    for fail_at in [Artwork, Cache, PkCache] {
+        let mut submitted = Vec::new();
+        let outcome = safety::run_wallet_sequence(|kind| {
+            submitted.push(kind);
+            if kind == fail_at {
+                Err("transfer or cleanup failed".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(outcome.unwrap_err().contains("transfer or cleanup failed"));
+        let expected = match fail_at {
+            Artwork => vec![Artwork],
+            Cache => vec![Artwork, Cache],
+            PkCache => vec![Artwork, Cache, PkCache],
+        };
+        assert_eq!(submitted, expected);
+    }
+}
+
+#[test]
+fn original_wallet_batch_accepts_only_complete_artwork() {
+    let png = b"\x89PNG\r\n\x1a\nexample";
+    let pdf = b"%PDF-1.7 example";
+    let card = "OM6NYhwXMZrAw0sRUjR62wmF4ZQ=";
+    let items = [
+        (safety::ARTWORK[0], png.as_slice()),
+        (safety::ARTWORK[1], png.as_slice()),
+        (safety::ARTWORK[2], pdf.as_slice()),
+    ];
+    assert!(safety::wallet_batch_target(card, &items).is_ok());
+    assert!(safety::wallet_batch_target("../../escape", &items).is_err());
+    assert!(safety::wallet_batch_target(card, &items[..2]).is_err());
+    let mut wrong = items;
+    wrong[2] = ("pass.json", pdf);
+    assert!(safety::wallet_batch_target(card, &wrong).is_err());
+    wrong[2] = (safety::ARTWORK[2], b"corrupted");
+    assert!(safety::wallet_batch_target(card, &wrong).is_err());
+    wrong[2] = (safety::ARTWORK[2], pdf);
+    wrong[0] = (safety::ARTWORK[1], png);
+    assert!(safety::wallet_batch_target(card, &wrong).is_err());
+}
+
+#[test]
+fn staging_readback_rejects_missing_partial_or_changed_payloads() {
+    let expected = [("stage/payload_0", b"original".as_slice())];
+    assert!(safety::verify_staged_payloads(&expected, |_| Ok(b"original".to_vec())).is_ok());
+    assert!(safety::verify_staged_payloads(&expected, |_| Ok(b"orig".to_vec())).is_err());
+    assert!(safety::verify_staged_payloads(&expected, |_| Ok(b"modified".to_vec())).is_err());
+    let error =
+        safety::verify_staged_payloads(&expected, |_| Err("AFC disconnected".into())).unwrap_err();
+    assert!(error.contains("AFC disconnected"));
+}
+
+#[test]
 fn books_restoration_allows_empty_original_files() {
     use std::{cell::RefCell, collections::HashMap};
     let files = RefCell::new(HashMap::<String, Vec<u8>>::new());

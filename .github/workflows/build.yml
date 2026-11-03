@@ -86,6 +86,8 @@ jobs:
           } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 dist/build-info.json
           Copy-Item LICENSE, README.md, cargo-test.log, cargo-build.log -Destination dist
           Copy-Item docs/TESTING.md -Destination dist/TESTING.md
+          New-Item -ItemType Directory -Path dist/docs | Out-Null
+          Copy-Item docs/UNIFIED_SCANNER.md, docs/REFRESH-FIX.md, docs/ORIGINAL-METHOD.md -Destination dist/docs
           "Artifact contains AirCard-Safe.exe and its SHA-256. Physical iPhone operation has not been tested." >> $env:GITHUB_STEP_SUMMARY
           "SHA-256: $($pe.SHA256)" >> $env:GITHUB_STEP_SUMMARY
       - name: Publish executable artifact

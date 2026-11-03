@@ -1,5 +1,7 @@
 # Wallet access review
 
+Historical review of the earlier strict-backup build. The current source restores the original transfer method with explicit user acceptance of no verified Wallet backup. See [current method](ORIGINAL-METHOD.md). The protected AFC read limitation remains; it is not used as a claim of backup or destination verification.
+
 ## Outcome
 
 The released Windows executable builds and starts, but its protected Wallet backup/readback design is not functional on stock iOS. The current failure must not be described as a user image problem, a successful backup, or a verified iPhone customization result. No executable fix or physical-device validation is claimed by this documentation update.

@@ -30,6 +30,7 @@ pub fn load_image(path: &std::path::Path) -> Result<DynamicImage> {
 #[derive(Clone)]
 pub struct PreparedSkin {
     pub png: Vec<u8>,
+    pub png2x: Vec<u8>,
     pub pdf: Vec<u8>,
     pub source_width: u32,
     pub source_height: u32,
@@ -56,9 +57,15 @@ impl PreparedSkin {
             .context("Could not encode prepared PNG")?;
 
         let pdf = png_to_pdf(&png).context("Could not generate card PDF artwork")?;
+        let second_image = cropped.resize_exact(1024, 646, FilterType::Lanczos3);
+        let mut png2x = Vec::new();
+        second_image
+            .write_to(&mut Cursor::new(&mut png2x), ImageFormat::Png)
+            .context("Could not encode prepared @2x PNG")?;
 
         Ok(Self {
             png,
+            png2x,
             pdf,
             source_width,
             source_height,
@@ -184,6 +191,18 @@ fn crop_bounds_for_card(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_artwork_uses_distinct_two_and_three_times_resolution() {
+        let skin = PreparedSkin::from_image_with_focus(DynamicImage::new_rgb8(512, 323), 0.5, 0.5)
+            .unwrap();
+        let three = image::load_from_memory(&skin.png).unwrap();
+        let two = image::load_from_memory(&skin.png2x).unwrap();
+        assert_eq!(three.dimensions(), (1536, 969));
+        assert_eq!(two.dimensions(), (1024, 646));
+        assert_ne!(skin.png, skin.png2x);
+        assert!(skin.pdf.starts_with(b"%PDF-"));
+    }
 
     #[test]
     fn invalid_dimensions_and_nonfinite_focus_are_rejected() {

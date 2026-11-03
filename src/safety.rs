@@ -45,6 +45,89 @@ pub const ARTWORK: [&str; 3] = [
     "cardBackgroundCombined.pdf",
 ];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WalletBatchKind {
+    Artwork,
+    Cache,
+    PkCache,
+}
+
+pub const CACHE_LEAVES: [&str; 3] = ["FrontFace", "PlaceHolder", "Preview"];
+// Exact upstream invalidation marker. This changes protected cache files and
+// is not a deletion, a verified refresh, or a guaranteed reversible operation.
+pub const CACHE_INVALIDATION_BYTES: &[u8] = b"corrupted";
+
+pub fn wallet_cache_target(
+    card: &str,
+    kind: WalletBatchKind,
+    items: &[(&str, &[u8])],
+) -> Result<String, String> {
+    let suffix = match kind {
+        WalletBatchKind::Cache => ".cache",
+        WalletBatchKind::PkCache => ".pkcache",
+        WalletBatchKind::Artwork => return Err("Artwork is not a cache target".into()),
+    };
+    if !valid_card_component(card) || items.len() != CACHE_LEAVES.len() {
+        return Err("Invalid Wallet cache target or incomplete batch".into());
+    }
+    for (index, (leaf, bytes)) in items.iter().enumerate() {
+        if *leaf != CACHE_LEAVES[index] || *bytes != CACHE_INVALIDATION_BYTES {
+            return Err("Wallet cache refresh is outside the fixed allowlist".into());
+        }
+    }
+    Ok(format!("/var/mobile/Library/Passes/Cards/{card}{suffix}"))
+}
+
+pub fn run_wallet_sequence(
+    mut submit: impl FnMut(WalletBatchKind) -> Result<(), String>,
+) -> Result<(), String> {
+    for kind in [
+        WalletBatchKind::Artwork,
+        WalletBatchKind::Cache,
+        WalletBatchKind::PkCache,
+    ] {
+        submit(kind).map_err(|error| {
+            format!("Wallet phase {kind:?} failed; partial changes are possible: {error}")
+        })?;
+    }
+    Ok(())
+}
+
+pub fn wallet_batch_target(card: &str, items: &[(&str, &[u8])]) -> Result<String, String> {
+    let target = format!("/var/mobile/Library/Passes/Cards/{card}.pkpass");
+    if items.len() != ARTWORK.len() {
+        return Err("All three Wallet artwork assets are required".into());
+    }
+    for (index, (leaf, bytes)) in items.iter().enumerate() {
+        if !valid_target(&target, leaf) || *leaf != ARTWORK[index] {
+            return Err("Write target is outside the Wallet artwork allowlist".into());
+        }
+        if bytes.is_empty() || bytes.len() > 32 * 1024 * 1024 {
+            return Err("Invalid artwork payload size".into());
+        }
+        let signature: &[u8] = if leaf.ends_with(".png") {
+            b"\x89PNG\r\n\x1a\n"
+        } else {
+            b"%PDF-"
+        };
+        if !bytes.starts_with(signature) {
+            return Err("Artwork payload has the wrong file signature".into());
+        }
+    }
+    Ok(target)
+}
+
+// Check Media staging bytes, never claim this proves protected destination bytes.
+pub fn verify_staged_payloads(
+    items: &[(&str, &[u8])],
+    mut read: impl FnMut(&str) -> Result<Vec<u8>, String>,
+) -> Result<(), String> {
+    for (path, expected) in items {
+        verify_bytes(expected, &read(path)?).map_err(str::to_string)?;
+    }
+    Ok(())
+}
+
 pub fn valid_card_component(value: &str) -> bool {
     let raw = value.trim_end_matches('=');
     let expected = match raw.len() {
@@ -104,7 +187,7 @@ pub fn run_with_cleanup(
         Ok(())
     } else {
         Err(format!(
-            "Operation incomplete; partial changes are possible. {}. Keep the backup and do not retry blindly.",
+            "Operation incomplete; partial changes are possible. {}. Preserve any existing recovery files and do not retry blindly.",
             errors.join("; ")
         ))
     }
