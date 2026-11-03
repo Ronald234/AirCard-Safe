@@ -37,3 +37,14 @@ fn main() -> eframe::Result<()> {
         Box::new(|cc| Ok(Box::new(app::AirCardApp::new(cc)))),
     )
 }
+
+#[cfg(test)]
+mod startup_tests {
+    #[test]
+    fn windows_renderer_has_a_native_dx12_backend() {
+        assert!(
+            eframe::wgpu::Instance::enabled_backend_features()
+                .contains(eframe::wgpu::Backends::DX12)
+        );
+    }
+}
