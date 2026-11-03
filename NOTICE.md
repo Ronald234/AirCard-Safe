@@ -5,14 +5,12 @@ Pinned upstream commit: 88131e301c88fd9238cbeff9d091967c3ddbf10f.
 Original LICENSE retained without changes.
 Credits: Lumid-Off, mak5er, 0xjohnnydev/airlift.
 
-The original was read through the connected GitHub file API because a direct
-git clone was blocked. Local Git history starts at an explicitly labeled
-source import; it is not the upstream commit graph. Work is isolated on
-the aircard-safe branch.
+The public repository is an independent GitHub fork with upstream history.
+The local workspace began with a source import because direct git clone was blocked.
+AirCard Safe uses Wallet-only UI, a native WGPU renderer, restrictive USB routing,
+session-only scanning, verified artwork backups, a strict write allowlist,
+read-back verification, explicit recovery errors and Windows CI artifact packaging.
 
-AirCard Safe modifications: Wallet-only UI, no keypad support, restrictive USB
-route policy, in-memory card scanning, verified user-selected artwork backups,
-strict write allowlist, read-back checks, explicit cleanup error handling, and
-Windows CI/artifact packaging. This development checkpoint is uncompiled as
-a complete application. No iPhone compatibility or complete-device backup is
-guaranteed.
+See docs/STATUS.md for the actual successful build, source commit, SHA-256,
+artifact URL and physical testing limits. No iPhone functionality, full-device
+backup or crash-safe restoration is guaranteed.

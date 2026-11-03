@@ -1,35 +1,43 @@
-# Actual status - 2026-11-02
+# AirCard Safe — verified Windows build
+Built source commit: 19aa77fdcdcf6c54b45336c36f04e1db32bc114d
+Windows Actions run: https://github.com/Ronald234/AirCard-Safe/actions/runs/41551859987
+Executable SHA-256: 7056296e7302d68cc928b23cba0c0c2ade136ff7367aad79d49e12846dc5b430
+Artifact: https://github.com/Ronald234/AirCard-Safe/actions/runs/41551859987/artifacts/13191908363
 
-This is an interim source checkpoint. The requested final executable is NOT delivered.
+## Observed results
+- cargo test --locked: 24 passed, 0 failed; 1 physical-iPhone test explicitly ignored.
+- cargo build --locked --release: passed.
+- cargo fmt --all -- --check: passed.
+- Windows renderer includes a native DirectX 12 backend: regression test passed.
+- Debug GUI startup: passed.
+- Actual release executable: PE32+ AMD64 Windows GUI header verified.
+- Actual release executable --self-check: passed.
+- Release GUI launch smoke test: passed (five-second process-alive check, no device attached).
+- PE verifier malformed/truncated header fixtures: 8 passed.
+- MIT upstream license retained; code and test workflows publicly available.
+- Password keypad module/UI removed. USB restrictions and explicit artwork backup checks remain enabled.
 
-| Requirement / check | Actual result |
-| --- | --- |
-| Original review and license | Pinned upstream source inspected; MIT LICENSE unchanged |
-| Independent branch | Local aircard-safe branch, imported upstream source baseline; no remote fork published |
-| Wallet-only UI / keypad removal | Implemented in source; complete application compilation unverified |
-| USB routing restrictions | USB sessions, rejection of network/unknown advertisements, rechecks before service/asset dispatch; physical isolation unverified |
-| Personal data minimization | Session-only card detection; explicit user-selected artwork backup with SHA-256 pseudonymous binding |
-| Backup / restore / cleanup | Source implementation fails closed, verifies bytes, combines failures; physical device behavior unverified |
-| Focused safety tests | rustc --edition=2024 --test tests/safety_tests.rs; 9 passed, 0 failed |
-| Test sensitivity | Deliberately skipping recovery caused 2 expected failures; restored code then passed all 9 tests |
-| PE verifier tests | 8 passed against synthetic header fixtures; these are NOT a program binary |
-| Cargo metadata | cargo metadata --locked --no-deps succeeded; AirCard-Safe binary target present |
-| Formatting and whitespace | cargo fmt --all -- --check and git diff --check passed |
-| Full cargo test --locked | BLOCKED before compilation, exit 101: index.crates.io DNS resolution failed |
-| Full cargo build --locked --release | BLOCKED before compilation, exit 101: same dependency download failure |
-| Independent source review | Found a closure capture conflict and two Books recovery verification errors; source fixes and focused regression tests added |
-| GitHub workflow | windows-latest workflow configured, NOT executed |
-| GitHub publication | BLOCKED: local CLI token invalid, connector lists no accessible repositories, browser signed out |
-| Final AirCard-Safe.exe / SHA-256 | NOT generated; no hash claimed |
-| Final binary Windows PE / launch test | NOT performed; will gate CI upload |
-| Physical iPhone / Windows 10 test | NOT performed |
+## Corrections verified by this build
+Original OpenGL renderer failed on the hosted Windows runner because OpenGL 2+ was unavailable.
+Safe now explicitly uses WGPU and enables its native backend defaults.
+A regression test checks native DirectX 12 backend availability.
+Cargo.lock was resolved on Windows, committed, and all final tests/builds then ran with --locked.
+The temporary lockfile resolver workflow was removed.
 
-## Remaining work
+## Required limits and pending physical checks
+No physical iPhone test was performed. No claim is made that artwork customization works on a real phone.
+Windows Server 2025 hosted CI is not a Windows 10/11 hardware certification.
+Apple Mobile Device Support and USB drivers must already be installed from official Apple software.
+Stock iOS may prevent reading the original Wallet artwork through AFC. Safe refuses to write in that situation.
+The artwork backup is not a full-device backup, and captured current artwork is not necessarily factory-original.
+Writes and restore are not atomic; unplugging, terminating the process or power loss can leave partial changes.
+Tracked Books snapshots are in memory only. They do not preserve all Books state or survive a crash.
+The private AirTrafficHost read API can block. There is no guaranteed timeout or rollback.
+Only USB sessions are selected, and concurrent network/unknown advertisements are rejected. AirTrafficHost chooses its route by UDID; physical transport isolation remains unverified.
+The executable is unsigned. The SHA-256 verifies byte consistency, not publisher identity.
+See TESTING.md for the physical-device test checklist.
 
-Sign in to GitHub and provide normal access to a destination repository for this project.
-Create the independent remote fork/repository, push the reviewed aircard-safe branch and let the Windows workflow run with network access.
-If test/build/launch fails, correct the reported issue and rerun. Only after a successful run, download and inspect the actual artifact and report its exact SHA-256 and run URL.
-Then perform the physical tests in TESTING.md before claiming iPhone functionality.
-
-The local environment already has Rust, so focused standard-library tests could run.
-No development-tool installer or local dependency generator was created for the end user.
+## Delivery
+Download the named GitHub Actions artifact, extract it and open AirCard-Safe.exe.
+No Python, Git, Rust, Cargo or Visual Studio is needed by the end user.
+Artifacts expire after 30 days. SHA256SUMS.txt and build-info.json accompany the executable.
