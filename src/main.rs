@@ -23,6 +23,7 @@ fn main() -> eframe::Result<()> {
         std::process::exit(if valid { 0 } else { 1 });
     }
     let options = eframe::NativeOptions {
+        renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 640.0])
             .with_min_inner_size([880.0, 560.0])

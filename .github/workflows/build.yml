@@ -30,11 +30,6 @@ jobs:
         run: |
           cargo test --locked 2>&1 | Tee-Object -FilePath cargo-test.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Release build with static CRT
-        shell: pwsh
-        run: |
-          cargo build --locked --release 2>&1 | Tee-Object -FilePath cargo-build.log
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Collect debug GUI startup diagnostics
         shell: pwsh
         run: |
@@ -53,6 +48,11 @@ jobs:
           } finally {
             if (-not $gui.HasExited) { Stop-Process -Id $gui.Id -Force }
           }
+      - name: Release build with static CRT
+        shell: pwsh
+        run: |
+          cargo build --locked --release 2>&1 | Tee-Object -FilePath cargo-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: PE verifier regression tests
         shell: pwsh
         run: ./scripts/test-verify-pe.ps1
@@ -62,6 +62,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $exe = (Resolve-Path 'target/release/AirCard-Safe.exe').Path
           $pe = ./scripts/verify-pe.ps1 -Path $exe
+          Write-Output "Verified Windows executable SHA-256: $($pe.SHA256)"
           $check = Start-Process -FilePath $exe -ArgumentList '--self-check' -Wait -PassThru -WindowStyle Hidden
           if ($check.ExitCode -ne 0) { throw 'Self-check failed' }
           $gui = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden -RedirectStandardError gui-release-stderr.log -RedirectStandardOutput gui-release-stdout.log
@@ -104,5 +105,4 @@ jobs:
             cargo-build.log
             gui-*.log
           retention-days: 7
-
 
