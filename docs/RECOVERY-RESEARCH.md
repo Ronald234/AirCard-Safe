@@ -37,3 +37,22 @@ Its tests can establish local integrity and failure behavior only. The component
 4. Distinguish original acquisition, local integrity, destination restoration and visible Wallet rendering. Evidence for one must never authorize the others.
 
 Until those conditions are met, re-enabling the old unbacked writer would bypass the user's recovery requirement. No functional editing fix or NFC compatibility is claimed.
+
+## Verified research milestone
+
+The research source at `a96be1087b66c0605bf9770a223a43f3a9ebde1f` passed [GitHub Actions run 41769323051](https://github.com/Ronald234/AirCard-Safe/actions/runs/41769323051):
+
+| Check | Result |
+|---|---|
+| Windows local-storage tests | 8 passed; no ignored tests |
+| Linux local-storage tests | 10 passed; no ignored tests |
+| Storage formatting, Clippy with warnings denied, locked release build | Passed on both platforms |
+| Unchanged Windows application regression | 117 passed test executions; 2 physical-device tests ignored |
+
+These counts include repeated shared-module executions in the application suite. Independent code review identified a Unix FIFO blocking issue; bounded, nonblocking ordinary-file reads and a regression test addressed it before this successful run. An earlier Windows-only lint failure was corrected before the successful run.
+
+The tested component checks supplied local bytes, corruption, incomplete captures, unexpected files, binding mismatch and preservation after injected interruption. It does not obtain phone originals, restore protected destinations or demonstrate visible image changes.
+
+A subsequent Windows private-ACL experiment is incomplete and is not part of the tested commit or shipping application. The local Windows environment became unavailable during follow-up validation. Owner validation, defensive SID bounds and supported-token Windows tests remain pending; AppContainer refusal alone does not validate normal-user behavior. The published component's documented Windows privacy and durability limitations still apply.
+
+No new executable enabling edits is delivered by this milestone. The production application remains unchanged and read-only. Actual original acquisition, auxiliary preimages, destination restoration and physical interruption/reconnect/rendering tests remain required before any writer can be enabled.
