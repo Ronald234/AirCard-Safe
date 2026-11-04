@@ -9,6 +9,9 @@ use std::{
     path::Path,
 };
 
+#[cfg(windows)]
+mod windows_privacy;
+
 const MAX_ASSET: usize = 32 * 1024 * 1024;
 const MAX_MANIFEST: usize = 4096;
 #[derive(Serialize, Deserialize)]
@@ -81,6 +84,8 @@ fn read_regular(path: &Path, limit: usize) -> Result<Vec<u8>> {
         use std::os::windows::fs::OpenOptionsExt;
         options.custom_flags(0x0020_0000);
     }
+    #[cfg(windows)]
+    windows_privacy::verify(path, false)?;
     let file = options.open(path)?;
     let metadata = file.metadata()?;
     reject_link(&metadata)?;
@@ -106,6 +111,8 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
         options.mode(0o600);
     }
     let mut file = options.open(path)?;
+    #[cfg(windows)]
+    windows_privacy::verify(path, false)?;
     file.write_all(bytes)?;
     file.sync_all()?;
     ensure!(
@@ -145,8 +152,8 @@ fn capture_impl(
         use std::os::unix::fs::DirBuilderExt;
         fs::DirBuilder::new().mode(0o700).create(root)?;
     }
-    #[cfg(not(unix))]
-    fs::create_dir(root)?; // Existing directories are never reused or overwritten.
+    #[cfg(windows)]
+    windows_privacy::create(root)?; // Existing directories are never reused or overwritten.
     directories_only(root)?;
     let mut entries: [Option<Entry>; 3] = [None, None, None];
     for (index, data) in assets.into_iter().enumerate() {
@@ -176,6 +183,8 @@ fn capture_impl(
 pub fn inspect(root: &Path, binding: &str) -> Result<LocalSnapshot> {
     ensure!(binding_valid(binding), "Invalid binding digest");
     directories_only(root)?;
+    #[cfg(windows)]
+    windows_privacy::verify(root, true)?;
     let manifest: Manifest =
         serde_json::from_slice(&read_regular(&root.join("manifest.json"), MAX_MANIFEST)?)?;
     ensure!(
