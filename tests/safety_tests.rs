@@ -253,3 +253,30 @@ fn cleanup_failure_is_never_reported_as_success() {
     );
     assert!(safety::run_with_cleanup(|| Ok(()), || Ok(()), || Ok(())).is_ok());
 }
+
+#[test]
+fn first_cleanup_failure_stops_later_wallet_phases_and_keeps_all_recovery_attempts() {
+    use std::cell::RefCell;
+    let events = RefCell::new(Vec::new());
+    let result = safety::run_wallet_sequence(|kind| {
+        events.borrow_mut().push(format!("{kind:?}"));
+        safety::run_with_cleanup(
+            || {
+                events.borrow_mut().push("work".into());
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("restore".into());
+                Err("restore failed".into())
+            },
+            || {
+                events.borrow_mut().push("cleanup".into());
+                Err("cleanup failed".into())
+            },
+        )
+    })
+    .unwrap_err();
+    assert_eq!(*events.borrow(), ["Artwork", "work", "restore", "cleanup"]);
+    assert!(result.contains("restore failed"));
+    assert!(result.contains("cleanup failed"));
+}

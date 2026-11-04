@@ -1,3 +1,5 @@
+> HISTORICAL — superseded by revision 4. Device writes/restoration are now blocked without verifiable recovery. Do not follow the old write instructions below.
+
 # Historical local-build record
 
 This filename belongs to an earlier original-transfer revision, before the current refresh and native-discovery correction. Historical local environment and private manual-test metadata are intentionally omitted from the public source tree.

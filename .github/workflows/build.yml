@@ -1,7 +1,7 @@
 name: AirCard Safe Windows
 on:
   push:
-    branches: ['aircard-safe', 'main', 'master']
+    branches: ['aircard-safe', 'aircard-safe-*', 'main', 'master']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -17,7 +17,7 @@ jobs:
       - name: Rust toolchain
         shell: pwsh
         run: |
-          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           rustup default stable
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -29,6 +29,13 @@ jobs:
         shell: pwsh
         run: |
           cargo test --locked 2>&1 | Tee-Object -FilePath cargo-test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Static correctness analysis
+        shell: pwsh
+        run: |
+          cargo clippy --locked --all-targets -- -D clippy::correctness 2>&1 | Tee-Object -FilePath cargo-clippy.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo tree --locked | Set-Content -Encoding utf8 dependency-tree.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Collect debug GUI startup diagnostics
         shell: pwsh
@@ -83,11 +90,13 @@ jobs:
             commit=$env:GITHUB_SHA; runner=$env:RUNNER_OS; rust=(rustc -V | Out-String).Trim()
             binary=$pe; self_check='passed'; launch_smoke='passed'
             iphone_physical_test='NOT PERFORMED'; windows10_physical_test='NOT PERFORMED'
+            device_mutations='BLOCKED: recovery not verifiable'; revision=4
           } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 dist/build-info.json
-          Copy-Item LICENSE, README.md, cargo-test.log, cargo-build.log -Destination dist
+          Copy-Item LICENSE, README.md, cargo-test.log, cargo-build.log, cargo-clippy.log, dependency-tree.txt -Destination dist
           Copy-Item docs/TESTING.md -Destination dist/TESTING.md
           New-Item -ItemType Directory -Path dist/docs | Out-Null
           Copy-Item docs/UNIFIED_SCANNER.md, docs/REFRESH-FIX.md, docs/ORIGINAL-METHOD.md -Destination dist/docs
+          Copy-Item docs/RECOVERY-AUDIT.md, docs/TRANSPORT-AUDIT.md, docs/SCANNER-DIAGNOSTICS.md, docs/COMPATIBILITY.md, docs/SECURITY-REVIEW.md -Destination dist/docs
           "Artifact contains AirCard-Safe.exe and its SHA-256. Physical iPhone operation has not been tested." >> $env:GITHUB_STEP_SUMMARY
           "SHA-256: $($pe.SHA256)" >> $env:GITHUB_STEP_SUMMARY
       - name: Publish executable artifact
@@ -105,6 +114,7 @@ jobs:
           path: |
             cargo-test.log
             cargo-build.log
+            cargo-clippy.log
             gui-*.log
           retention-days: 7
 

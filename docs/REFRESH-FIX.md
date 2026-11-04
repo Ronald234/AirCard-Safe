@@ -1,3 +1,5 @@
+> HISTORICAL — superseded by revision 4. Device writes/restoration are now blocked without verifiable recovery. Do not follow the old write instructions below.
+
 # Correction of the omitted Wallet refresh phases
 
 ## Problem and implementation

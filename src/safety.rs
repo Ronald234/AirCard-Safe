@@ -192,3 +192,11 @@ pub fn run_with_cleanup(
         ))
     }
 }
+
+/// No trusted, non-destructive original-artwork/recovery capability is implemented.
+/// This is deliberately not configurable through UI state or a local manifest.
+pub const RECOVERY_BLOCK_REASON: &str = "Operación bloqueada: no se ha verificado una copia segura del arte original ni su recuperación. AFC estándar solo accede a /var/mobile/Media y no permite verificar los originales en Wallet ni su restauración. No se ha escrito nada en el dispositivo. La vista previa y la exportación local siguen disponibles.";
+
+pub fn require_verified_recovery() -> Result<(), String> {
+    Err(RECOVERY_BLOCK_REASON.to_string())
+}

@@ -1,33 +1,24 @@
-# AirCard Safe - revision 3 build validation
+# Revision 4 validation status
 
-## GitHub Actions delivery
+Current source changes passed local Windows verification. GitHub Actions publication/verification is still pending; this file will be updated with the actual successful run and artifact after completion.
 
-Run: https://github.com/Ronald234/AirCard-Safe/actions/runs/41650863325
-Built source: d54064a3c3bfde480be2d1e6afa03ed5506180cd
-Artifact: https://github.com/Ronald234/AirCard-Safe/actions/runs/41650863325/artifacts/13236984039
-Name: AirCard-Safe-Windows-x64
-Executable SHA-256: 8113c57564313ef3cc003e8edd8dde2853385e813db8d4215551d9bf0efd84e9
-ZIP digest from GitHub: 560c7a70d9ff644f90d134608736514b14e2459603999f25c2ebcd3c0776afa8
-Artifact expires: 2026-12-03.
+| Check | Actual result |
+|---|---|
+| cargo test --locked | 117 passed executions, 0 failed, 2 ignored physical USB tests |
+| Main unit suite | 56 passed, 1 ignored |
+| Engine integration suite | 1 passed |
+| Recovery integration suite | 7 passed |
+| Safety integration suite | 15 passed |
+| Scanner integration suite | 38 passed, 1 ignored |
+| cargo clippy --locked --all-targets -- -D clippy::correctness | Passed; nonblocking dead-code/style warnings remain |
+| cargo build --locked --release | Passed after ZIP 9.3.0 update |
+| PE verifier fixture suite | 8 passed |
+| Actual release binary | PE32+ AMD64 Windows GUI |
+| Release --self-check | Passed |
+| Release GUI launch smoke | Passed, five seconds without an iPhone |
 
-All Actions steps passed on windows-latest: cargo test --locked (50 passed, 0 failed, 1 physical-device test explicitly ignored), cargo build --locked --release, formatting, eight PE verifier fixtures, actual PE32+ AMD64 Windows GUI header validation, executable self-check, debug/release launch smoke tests and artifact publication.
+Some shared unit tests run again inside integration harnesses; 117 is an execution total, not a count of unique test definitions. Physical USB enumeration is repeated as ignored in two harnesses and is not counted as a pass.
 
-Extract the artifact and open AirCard-Safe.exe. SHA256SUMS.txt, build-info.json, test/build logs, LICENSE, TESTING.md and the adapted scanner's upstream MIT notice are included. No Python, Git, Rust, Cargo or Visual Studio installation is required to run the executable. Official Apple USB support remains a prerequisite.
+Applying/restoring images is blocked before any device access because protected original artwork and recovery cannot be verified. The artifact will support USB diagnosis and local image design/export. The revision 3 artifact is historical and does not meet this recovery requirement.
 
-## Corrections
-
-The original artwork -> .cache -> .pkcache sequence is restored with exact selected-card targets and fail-fast error handling. Separate @2x/@3x images are prepared. Native unified logs support structured pass observations without a Python helper. Observations merge by identifier, explicit incompatible evidence revokes inferred payment compatibility, and a full observation budget cannot suppress that revocation. Untyped/incompatible passes remain read-only.
-
-See REFRESH-FIX.md, UNIFIED_SCANNER.md and TESTING.md for implementation, attribution and testing detail. Personal device metadata and private manual-test details are intentionally omitted from this public report.
-
-## Compatibility and recovery limits
-
-Apple Card's dynamic face is not supported by the original static-artwork method. Explicit Apple Card context is read-only and the UI requires compatibility acknowledgement. Opaque identifiers alone cannot reliably reveal issuer or pass type.
-
-Gym/NFC discovery is not artwork compatibility. Untyped or incompatible pass observations remain read-only; privacy-redacted identifiers cannot be recovered. CI does not test real-device artwork changes, restoration, payments or gym access.
-
-Protected destination bytes and cache regeneration cannot be verified through ordinary AFC. No verified Wallet backup or guaranteed restoration exists. Writes can be partial; tracked Books snapshots are in memory and do not survive process death. Private Apple calls can block despite software deadlines. USB selection checks are implemented but end-to-end physical route isolation is not certified. The executable is unsigned; its checksum verifies byte consistency, not publisher identity.
-
-## Local delivery limitation
-
-Automatic download/extraction of the CI archive into the local workspace was blocked by the environment's approval policy. No alternate automated download route was used. The already verified local revision remains available; users can download the CI artifact through the link above. Its own SHA256SUMS.txt is authoritative for the downloaded executable.
+No physical iPhone test, NFC compatibility, gym entry, payment, protected-image restoration or Windows 10 physical validation is claimed for revision 4. Apple Devices loading and native service behavior require physical/runtime verification. A complete fresh RustSec dependency audit remains pending; targeted ZIP advisories were reviewed and the inherited version upgraded. See SECURITY-REVIEW.md, COMPATIBILITY.md and RECOVERY-AUDIT.md.

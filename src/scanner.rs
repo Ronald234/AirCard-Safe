@@ -6,16 +6,69 @@ use regex::Regex;
 
 use crate::device::ConnectionMode;
 
+#[path = "scanner/runtime.rs"]
 mod runtime;
+#[path = "scanner/unified.rs"]
 mod unified;
 
-pub use runtime::scan_wallet_items;
+pub use runtime::{scan_wallet_items, scan_wallet_items_with_diagnostics};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PassKind {
+    Generic,
+    Loyalty,
+    Transit,
+    Access,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WalletItem {
     PaymentCard(String),
     UnsupportedPass(String),
     CandidatePass(String),
+    ClassifiedPass(String, PassKind),
+}
+
+fn explicit_kind(line: &str) -> (Option<PassKind>, bool) {
+    static KIND: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+        r#"(?i)(?:^|[\s{,;])(?:"?(?:passType|passKind)"?\s*[:=]\s*"?(generic|loyalty|transit|access)"?(?:[\s,;}\"]|$)|"(generic|storeCard|boardingPass)"\s*:\s*\{)"#
+    ).unwrap()
+    });
+    let mut kind = None;
+    for capture in KIND.captures_iter(line) {
+        let value = capture
+            .get(1)
+            .or_else(|| capture.get(2))
+            .unwrap()
+            .as_str()
+            .to_ascii_lowercase();
+        let next = match value.as_str() {
+            "generic" => PassKind::Generic,
+            "loyalty" | "storecard" => PassKind::Loyalty,
+            "transit" => PassKind::Transit,
+            "access" => PassKind::Access,
+            // A boarding pass is a generic nonpayment layout, not a transit credential.
+            "boardingpass" => PassKind::Generic,
+            _ => continue,
+        };
+        if kind.is_some_and(|previous| previous != next) {
+            return (None, true);
+        }
+        kind = Some(next);
+    }
+    (kind, false)
+}
+
+fn has_wallet_context(line: &str) -> bool {
+    static CONTEXT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+        // Source context belongs to the prefix, never a quoted/embedded
+        // process or framework name in an unrelated logger's message.
+        r#"(?i)^\s*(?:(?:(?:[a-z]{3}\s+[0-9]{1,2}\s+|[0-9]{4}-[0-9]{2}-[0-9]{2}[T ])[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:?[0-9]{2})?\s+\S+\s+)?(?:passd|nfcd|nanopassd|passbook|npkcompanion|passkit|passkitui)(?:[\s:(\[]|$)|[^:\r\n()]{1,128}\((?:passkit|passkitui|stockholm|wallet)\):|(?:PDCardFileManager|PDPassLibrary|VerificationCheck)[:.])"#
+    ).unwrap()
+    });
+    line.len() <= 128 * 1024 && CONTEXT.is_match(line)
 }
 
 fn extract_wallet_items(line: &str) -> Vec<WalletItem> {
@@ -26,7 +79,7 @@ fn extract_wallet_items(line: &str) -> Vec<WalletItem> {
     });
     static SELECTED: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-        r#"(?i)(?:selected pass uniqueID\s*:\s*|PDCardFileManager:\s*writing card\s+|PDPassLibrary:\s*wrote pass\s+|VerificationCheck\.)(?:")?([-A-Za-z0-9_+=]{20,128})(?:[\s"'),]|$)"#
+        r#"(?i)(?:selected pass uniqueID\s*:\s*|PDCardFileManager:\s*writing card\s+|PDPassLibrary:\s*wrote pass\s+|VerificationCheck\.)(?:"([-A-Za-z0-9_.+=]{1,128})"|'([-A-Za-z0-9_.+=]{1,128})'|([-A-Za-z0-9_.+=]{1,128})(?:[\s),]|$))"#
     ).unwrap()
     });
     static IN_SESSION: LazyLock<Regex> = LazyLock::new(|| {
@@ -39,30 +92,60 @@ fn extract_wallet_items(line: &str) -> Vec<WalletItem> {
         // containing "membership" is not itself evidence of a pass layout.
         Regex::new(r#"(?i)(?:^|[\s:("'])(?:membership|storecard|generic pass|boardingpass|eventticket|coupon|apple card|applecard)(?:[\s:),"']|$)|"generic"\s*:|/(?:thumbnail|strip|artwork)(?:@[23]x)?\.png(?:[\s"'),]|$)"#).unwrap()
     });
+    static DASHBOARD: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+        r#"(?i)Dashboard loading[^:\r\n]{0,512}:\s*(?:for\s+([-A-Za-z0-9_+=]{20,128})(?:[,\s"')]|$)|([-A-Za-z0-9_+=]{20,128})\s+-)"#
+    ).unwrap()
+    });
     if line.len() > 128 * 1024 {
         return Vec::new();
     }
-    let lower = line.to_lowercase();
-    if !WALLET_KEYWORDS.iter().any(|key| lower.contains(key)) {
+    if !has_wallet_context(line) {
         return Vec::new();
     }
-    let membership = MEMBERSHIP_CONTEXT.is_match(line);
+    let (kind, conflicting_kind) = explicit_kind(line);
+    let membership = conflicting_kind || MEMBERSHIP_CONTEXT.is_match(line);
     let mut result = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for capture in PATHS.captures_iter(line) {
+        if seen.len() >= 256 {
+            break;
+        }
         let id = &capture[1];
         if seen.insert(id.to_string()) {
-            result.push(if !membership && is_valid_card_hash(id) {
+            result.push(if let Some(kind) = kind {
+                WalletItem::ClassifiedPass(id.into(), kind)
+            } else if membership {
+                WalletItem::UnsupportedPass(id.into())
+            } else if is_valid_card_hash(id) {
                 WalletItem::PaymentCard(id.into())
             } else {
-                WalletItem::UnsupportedPass(id.into())
+                WalletItem::CandidatePass(id.into())
             });
         }
     }
     for capture in SELECTED.captures_iter(line) {
-        let id = &capture[1];
+        if seen.len() >= 256 {
+            break;
+        }
+        let id = capture
+            .get(1)
+            .or_else(|| capture.get(2))
+            .or_else(|| capture.get(3))
+            .unwrap()
+            .as_str();
+        if [
+            ".", "..", "...", "null", "nil", "none", "unknown", "private", "redacted",
+        ]
+        .iter()
+        .any(|placeholder| id.eq_ignore_ascii_case(placeholder))
+        {
+            continue;
+        }
         if seen.insert(id.to_string()) {
-            result.push(if membership {
+            result.push(if let Some(kind) = kind {
+                WalletItem::ClassifiedPass(id.into(), kind)
+            } else if membership {
                 WalletItem::UnsupportedPass(id.into())
             } else {
                 WalletItem::CandidatePass(id.into())
@@ -72,14 +155,34 @@ fn extract_wallet_items(line: &str) -> Vec<WalletItem> {
     // Express-mode global configuration is stale-capable and is never inventory.
     for list in IN_SESSION.captures_iter(line) {
         for capture in LIST_ID.captures_iter(&list[1]) {
+            if seen.len() >= 256 {
+                break;
+            }
             let id = &capture[1];
             if seen.insert(id.to_string()) {
-                result.push(if membership {
+                result.push(if let Some(kind) = kind {
+                    WalletItem::ClassifiedPass(id.into(), kind)
+                } else if membership {
                     WalletItem::UnsupportedPass(id.into())
                 } else {
                     WalletItem::CandidatePass(id.into())
                 });
             }
+        }
+    }
+    for capture in DASHBOARD.captures_iter(line) {
+        if seen.len() >= 256 {
+            break;
+        }
+        let id = capture.get(1).or_else(|| capture.get(2)).unwrap().as_str();
+        if seen.insert(id.to_string()) {
+            result.push(if let Some(kind) = kind {
+                WalletItem::ClassifiedPass(id.into(), kind)
+            } else if membership {
+                WalletItem::UnsupportedPass(id.into())
+            } else {
+                WalletItem::CandidatePass(id.into())
+            });
         }
     }
     result
@@ -492,5 +595,171 @@ mod tests {
                 g
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod revision4_tests {
+    use super::*;
+    #[test]
+    fn dashboard_candidates_require_live_wallet_context_and_complete_identifier() {
+        let id = "synthetic-pass-123456789";
+        for message in [
+            format!("Passbook(PassKitUI): Dashboard loading (...): for {id}, pass feature unknown"),
+            format!("Passbook(PassKitUI): Dashboard loading (...): {id} - m:NO"),
+        ] {
+            assert_eq!(
+                extract_wallet_items(&message),
+                vec![WalletItem::CandidatePass(id.into())]
+            );
+        }
+        assert!(
+            extract_wallet_items(
+                "webserver: wallet Dashboard loading (...): for synthetic-pass-123456789, password"
+            )
+            .is_empty()
+        );
+        assert!(
+            extract_wallet_items(
+                "Passbook: Dashboard loading (...): for ../../synthetic-pass-123456789, other"
+            )
+            .is_empty()
+        );
+    }
+}
+
+#[cfg(test)]
+mod classification_v4_tests {
+    use super::*;
+    #[test]
+    fn explicit_pass_layout_classification_is_not_inferred_from_identifier_or_issuer() {
+        let id = "synthetic-pass-123456789";
+        for (metadata, kind) in [
+            ("passType: generic", "Generic"),
+            ("passType: loyalty", "Loyalty"),
+            ("passType: transit", "Transit"),
+            ("passType: access", "Access"),
+        ] {
+            let line = format!("passd: {metadata}; selected pass uniqueID : \"{id}\"");
+            assert_eq!(
+                format!("{:?}", extract_wallet_items(&line)),
+                format!("[ClassifiedPass(\"{id}\", {kind})]")
+            );
+        }
+        assert_eq!(
+            extract_wallet_items(
+                "passd: issuer=ExampleGym selected pass uniqueID : \"access-loyalty-generic-12345\""
+            ),
+            vec![WalletItem::CandidatePass(
+                "access-loyalty-generic-12345".into()
+            )]
+        );
+    }
+}
+
+#[cfg(test)]
+mod literal_identifier_tests {
+    use super::*;
+    #[test]
+    fn absent_or_placeholder_selection_is_not_a_discovered_identifier() {
+        for placeholder in [
+            "null", "nil", "none", "unknown", "private", "redacted", "...",
+        ] {
+            let line = format!("passd: selected pass uniqueID : {placeholder}");
+            assert!(
+                extract_wallet_items(&line).is_empty(),
+                "placeholder must not become inventory"
+            );
+        }
+    }
+    #[test]
+    fn selected_event_preserves_complete_short_dotted_identifier_without_guessing() {
+        assert_eq!(
+            extract_wallet_items("nfcd: selected pass uniqueID : \"pass.example.42\""),
+            vec![WalletItem::CandidatePass("pass.example.42".into())]
+        );
+        assert!(
+            extract_wallet_items("nfcd: selected pass uniqueID : \"partial-pass-123456789 extra\"")
+                .is_empty()
+        );
+        assert!(extract_wallet_items("nfcd: selected pass uniqueID : \"../private\"").is_empty());
+        assert!(extract_wallet_items("nfcd: selected pass uniqueID : \"..\"").is_empty());
+        assert!(extract_wallet_items("nfcd: selected pass uniqueID : \"not-finished").is_empty());
+    }
+    #[test]
+    fn conflicting_explicit_layouts_are_unsupported_instead_of_guessing() {
+        let id = "4FD0Y4djT-oIj--0Odq8GMLVpVo";
+        assert_eq!(
+            extract_wallet_items(&format!(
+                "passd: passType: transit; passKind: access; /var/mobile/Library/Passes/Cards/{id}.pkpass"
+            )),
+            vec![WalletItem::UnsupportedPass(id.into())]
+        );
+    }
+}
+
+#[cfg(test)]
+mod process_context_tests {
+    use super::*;
+    #[test]
+    fn unrelated_loggers_cannot_impersonate_wallet_events_in_message_text() {
+        for line in [
+            "webserver: received nfcd: passType: access; selected pass uniqueID : \"synthetic-pass-123456789\"",
+            "unrelated: quoted PDPassLibrary: wrote pass synthetic-pass-123456789",
+            "webserver: Passbook(PassKitUI): Dashboard loading (...): for synthetic-pass-123456789, metadata",
+        ] {
+            assert!(
+                extract_wallet_items(line).is_empty(),
+                "unrelated process must not supply inventory"
+            );
+        }
+        assert_eq!(
+            extract_wallet_items(
+                "Nov  4 12:00:00 ExamplePhone nfcd[123]: selected pass uniqueID : \"synthetic-pass-123456789\""
+            ),
+            vec![WalletItem::CandidatePass("synthetic-pass-123456789".into())]
+        );
+    }
+}
+
+#[cfg(test)]
+mod bounded_path_tests {
+    use super::*;
+    #[test]
+    fn opaque_path_identifiers_remain_unknown_without_layout_evidence() {
+        assert_eq!(
+            extract_wallet_items(
+                "passd: /var/mobile/Library/Passes/Cards/opaque-pass-1234567890.pkpass"
+            ),
+            vec![WalletItem::CandidatePass("opaque-pass-1234567890".into())]
+        );
+    }
+    #[test]
+    fn a_single_record_cannot_create_more_than_256_observations() {
+        let line = format!(
+            "passd: {}",
+            (0..300)
+                .map(|index| format!(
+                    "/var/mobile/Library/Passes/Cards/synthetic-pass-{index:012}.pkpass"
+                ))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        assert_eq!(extract_wallet_items(&line).len(), 256);
+    }
+}
+
+#[cfg(test)]
+mod framework_prefix_tests {
+    use super::*;
+    #[test]
+    fn framework_context_is_accepted_only_inside_the_source_prefix() {
+        assert_eq!(
+            extract_wallet_items(
+                "SpringBoard(PassKit): selected pass uniqueID : \"synthetic-pass-123456789\""
+            ),
+            vec![WalletItem::CandidatePass("synthetic-pass-123456789".into())]
+        );
+        assert!(extract_wallet_items("webserver: SpringBoard(PassKit): selected pass uniqueID : \"synthetic-pass-123456789\"").is_empty());
     }
 }

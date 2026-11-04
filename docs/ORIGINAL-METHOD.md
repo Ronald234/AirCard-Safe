@@ -1,3 +1,5 @@
+> HISTORICAL — superseded by revision 4. Device writes/restoration are now blocked without verifiable recovery. Do not follow the old write instructions below.
+
 # Original transfer method with bounded changes
 
 The user requested retaining the original application method and removing risky behavior, instead of requiring a protected-file backup that ordinary AFC cannot obtain.

@@ -1,3 +1,5 @@
+> HISTORICAL — superseded by revision 4 recovery gate. This document describes source limitations, not an enabled write flow.
+
 # Static artwork compatibility limitations
 
 ## Apple Card

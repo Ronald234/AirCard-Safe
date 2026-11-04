@@ -1,69 +1,47 @@
-# AirCard Safe
+# AirCard Safe — revisión 4
 
-Experimental native Windows application for customizing Apple Wallet artwork.
-Independent MIT-licensed modification of [Lumid-Off/AirCard-Windows](https://github.com/Lumid-Off/AirCard-Windows).
-**Windows build validation:** the locked test suite, release build, executable checks and GitHub Actions artifact passed. This is not a guarantee of artwork, payment, restoration or gym-access compatibility. See [validation](docs/STATUS.md).
+Aplicación nativa de Windows para diagnosticar la detección de Apple Wallet por **USB** y preparar imágenes localmente. Código abierto MIT, derivado de [Lumid-Off/AirCard-Windows](https://github.com/Lumid-Off/AirCard-Windows), con comparación técnica del [fork de dhava-gautama](https://github.com/dhava-gautama/AirCard-Windows).
 
-**Apple Card is not supported by the original static-artwork method.** Its digital face uses dynamic vector rendering, as stated in the [original Mac project's pinned README](https://github.com/Mak5er/AirCard/blob/52ba05dca4bdc590672c19d554701f4438e20338/README.md). This revision does not claim to fix Apple Card. Explicit Apple Card log context is classified read-only; opaque identifiers do not reliably reveal issuer/type, so the UI also requires the user to confirm the selected card is not Apple Card or an NFC membership credential.
+**Esta revisión bloquea aplicar y restaurar imágenes en el iPhone.** No existe un método verificado de respaldar el arte protegido y comprobar su recuperación usando el AFC normal. Ni aceptar un aviso ni aportar archivos con SHA-256 elimina esa limitación. El método anterior de escritura sin respaldo deja de estar disponible. No se alteran cachés, Books, pases, credenciales NFC ni mecanismos de autenticación.
 
-**Original artwork and refresh sequence restored:** applying sends the three artwork files, then the selected card's `.cache` and `.pkcache` invalidation batches, using upstream's StreamingZip/AirTraffic method. Cache invalidation overwrites six protected cache files with upstream's invalid-data marker. **No verified Wallet backup or guaranteed restoration is available.** User acknowledgement is required. Transfer completion does not prove a visible change. See [method and remaining limits](docs/ORIGINAL-METHOD.md) and [refresh correction](docs/REFRESH-FIX.md).
+## Descargar el ejecutable
 
-## Download and run
+En [Actions: AirCard Safe Windows](https://github.com/Ronald234/AirCard-Safe/actions/workflows/build.yml), abre la ejecución correcta de esta revisión que termine en **success** y descarga **AirCard-Safe-Windows-x64**. Extrae el ZIP y abre **AirCard-Safe.exe**. El paquete incluye `SHA256SUMS.txt`, `build-info.json`, los resultados de pruebas y documentación. Los artifacts caducan a los 30 días; GitHub puede exigir iniciar sesión.
 
-Open the [verified revision 3 artifact](https://github.com/Ronald234/AirCard-Safe/actions/runs/41650863325/artifacts/13236984039), or use the Actions tab and select the successful revision 3 **AirCard Safe Windows** run.
-Download **AirCard-Safe-Windows-x64**, extract it, and open **AirCard-Safe.exe**.
-GitHub may require sign-in to download an artifact. Artifacts expire after 30 days.
+Verifica en PowerShell: `Get-FileHash .\AirCard-Safe.exe -Algorithm SHA256`. Debe coincidir con `SHA256SUMS.txt`. El SHA-256 comprueba integridad; el programa no tiene firma de código.
 
-Compare `Get-FileHash .\AirCard-Safe.exe -Algorithm SHA256` with **SHA256SUMS.txt**.
-The hash checks file consistency, not the publisher's identity; the executable is not code-signed.
+El usuario no necesita Python, Git, Rust, Cargo ni Visual Studio. Para conectarse al iPhone necesita los controladores y bibliotecas oficiales de Apple (Apple Devices/iTunes según la instalación). No se redistribuyen DLL de Apple ni se descargan dependencias de desarrollo. Windows 10/11 x64 es el objetivo; una compilación en CI no certifica todas esas instalaciones.
 
-No Python, Git, Rust, Cargo or Visual Studio is needed on the end user's computer.
-Windows 10/11 x64 is the intended target. Apple Mobile Device Support and its USB driver must already be installed from official Apple software.
-This application does not redistribute Apple's proprietary DLLs or install development tools.
+## Uso
 
-## Use
+1. Conecta el iPhone desbloqueado por USB y acepta Confiar. Safe rechaza rutas Wi-Fi o ambiguas; puede ser necesario desactivar sincronización por Wi-Fi.
+2. Pulsa **Comprobar soporte Apple** y **Buscar iPhone por USB**.
+3. Inicia **Diagnosticar tarjetas y pases**. Abre Wallet y selecciona el pase. La captura se limita a unos dos minutos, con cancelación; una llamada privada de Apple que se bloquee puede exceder el plazo.
+4. Revisa las observaciones y el resumen. Solo se clasifica un pase cuando existe evidencia explícita en los eventos. Una ruta o un identificador no demuestra compatibilidad de imagen ni NFC.
+5. Si necesitas compartir el diagnóstico, guárdalo como JSON. Contiene solo contadores y estados fijos: no contiene registros originales, identificadores, nombres, rutas, códigos ni datos del dispositivo. No se sube automáticamente.
+6. Elige una imagen y ajusta el recorte. Puedes exportar un ZIP local con PNG @2x/@3x, PDF y SHA-256. **Ese ZIP no es un pase firmado ni un respaldo y no se instala en Wallet.** No se sobrescriben archivos existentes.
 
-1. Connect an unlocked iPhone by USB and trust the computer.
-2. Disable Wi-Fi sync in Apple Devices/iTunes. Safe refuses a device with a concurrent network or unknown transport advertisement.
-3. Click **Buscar iPhone por USB**, then **Detectar tarjetas y pases**, and open the intended card in Wallet. Each fresh scan clears previous observations.
-4. Stop detection, choose a PNG/JPG/WebP image, and adjust the crop.
-5. Confirm that the selection is a supported static-artwork payment card, not Apple Card or a membership/NFC credential, and accept that there is no verified Wallet backup or guaranteed restoration.
-6. Click **Aplicar imagen y refrescar Wallet**. Keep the phone connected through all three phases, Books restoration and cleanup. Do not repeat a failed write blindly.
-7. Force-close Wallet through the iPhone's app switcher and reopen it to inspect the visual result. The program cannot verify that result.
+Aplicar y restaurar permanecen deshabilitados tanto en la interfaz como en el backend. No hay una opción para ignorar la protección. Las funciones de modificación del teclado de contraseña no están incluidas.
 
-Only if you already have a compatible complete artwork backup: detect the same card, select its existing backup folder and choose **Enviar imagenes del respaldo existente**. Local digest/binding checks are performed; protected destination bytes and the visual restoration remain unverified. This build does not create that backup.
+## Detección y límites
 
-Discovery now uses native unified logs, with a legacy USB fallback if initialization fails. It can show structured pass/NFC observations that the earlier syslog-only scanner missed. Untyped and incompatible passes are read-only; detecting one does not prove its artwork is compatible. Explicit membership/layout evidence revokes inferred payment compatibility for that identifier. Privacy-redacted identifiers cannot be recovered. No gym-pass compatibility claim is made. See [scanner source and upstream notice](docs/UNIFIED_SCANNER.md).
+Se añaden los eventos Dashboard encontrados en el fork y clasificación explícita genérica, fidelidad, transporte y acceso, además de candidatos desconocidos. Los datos privados ocultos por iOS no se recuperan ni se inventan. Los eventos ausentes no prueban que el pase no exista.
 
-## Safety limits
+No se declara funcionamiento físico de esta revisión con tarjetas bancarias, pases de gimnasio, tiendas ni NFC. La compatibilidad por tipo/iOS y las pruebas pendientes están en [COMPATIBILITY.md](docs/COMPATIBILITY.md). Apple Card usa una representación dinámica que el método de imágenes estáticas no soporta.
 
-- Wallet-only UI; password keypad support removed from the build and source tree.
-- Exactly three artwork filenames and six fixed cache leaves are allowed, all scoped to the selected payment-card identifier. Pass metadata, NFC credentials and keypad files are not write targets.
-- Device/card identifiers remain in session memory. No card list, syslog or bank name is saved automatically.
-- Backups contain artwork, SHA-256 digests and a pseudonymous device/card binding. Protect these files.
-- Scanning stops after two minutes. Images are limited to 20 MiB, 8192 pixels per dimension and a 128 MiB decoding allocation limit.
-- Artwork is generated at separate @3x (1536x969) and @2x (1024x646) resolutions; the earlier build reused the @3x bytes for both filenames.
-- Ordinary AFC is used for Media staging, not for reading protected Wallet artwork. All staged payload bytes and the staged Books manifest are read back before dispatch.
-- **No verified Wallet backup is created. Applying without one is the original transfer behavior and carries an explicit risk of changes that cannot be restored.**
-- Captured artwork is the current appearance; it is not guaranteed to be the factory original.
-- Incomplete, changed or wrong-device backups are rejected. Existing backup files are never silently overwritten.
-- Tracked Books files are restored and read back after an attempted transfer. Protected Wallet destination bytes cannot be verified through ordinary AFC.
-- Writes are not atomic. Disconnect, process termination or power loss can leave partial changes.
-- Tracked Books state is held in memory and does not survive process termination. No crash-safe rollback is guaranteed.
-- Recovery runs after write errors and combines write/restore/cleanup failures. A failed phase stops subsequent phases; no automatic file-by-file retries or recursive symlink cleanup.
-- Refresh deliberately overwrites `FrontFace`, `PlaceHolder`, and `Preview` inside the selected card's `.cache` and `.pkcache` directories using the upstream `corrupted` marker. This is not a verified deletion or guaranteed cache regeneration. Its omission in the earlier Safe build could prevent a visible refresh; restoring it still needs physical validation.
-- AirTrafficHost chooses transport by UDID. Safe rejects concurrent non-USB advertisements and rechecks before service/asset dispatch; physical transport isolation remains unverified.
-- The private AirTrafficHost read API can block. Safe keeps the worker alive and prevents normal closure while it may still write. There is no guaranteed timeout.
+El respaldo del fork mueve originales, acepta capturas parciales y puede borrar una copia antes de recuperarla. **No se integró ese respaldo.** La negociación AirTraffic/Grappa se comparó mediante revisión de código. El formato de archivo agrupado conserva pruebas offline, pero el escritor queda fuera del ejecutable: una sincronización exitosa no prueba recuperación. Consulta [RECOVERY-AUDIT.md](docs/RECOVERY-AUDIT.md) y [TRANSPORT-AUDIT.md](docs/TRANSPORT-AUDIT.md).
 
-## Build and validation
+## Pruebas y compilación
 
-See the successful Actions run and its **build-info.json**, **cargo-test.log**, **cargo-build.log** and **TESTING.md**.
-CI runs `cargo test --locked` and `cargo build --locked --release` on `windows-latest`.
-The artifact must pass PE32+ AMD64 GUI header validation, a self-check and a brief GUI launch smoke test before upload.
-A successful CI run is not a physical iPhone test or a Windows 10 hardware certification.
+GitHub Actions usa `windows-latest`, `cargo test --locked`, análisis Clippy y `cargo build --locked --release`. Antes de publicar verifica PE32+ AMD64 Windows GUI, `--self-check` y arranque breve sin iPhone. El artifact contiene los logs y hash del binario realmente compilado. No confundir estas comprobaciones con pruebas físicas de restauración, pago o acceso al gimnasio.
 
-The package identity remains `aircard 1.2.4` to preserve upstream Cargo.lock; the binary target is **AirCard-Safe**.
-Static CRT is requested in .cargo/config.toml. LICENSE is retained unchanged.
-Pinned upstream revision: `88131e301c88fd9238cbeff9d091967c3ddbf10f`.
-Credits: Lumid-Off (Windows), mak5er (original application), 0xjohnnydev/airlift (underlying research).
+Ver [TESTING.md](docs/TESTING.md), [SECURITY-REVIEW.md](docs/SECURITY-REVIEW.md), [SCANNER-DIAGNOSTICS.md](docs/SCANNER-DIAGNOSTICS.md) y [STATUS.md](docs/STATUS.md). Los documentos del método anterior se conservan como historial y **no son instrucciones para esta revisión**.
 
+## Referencias y licencia
+
+- Original Windows: `88131e301c88fd9238cbeff9d091967c3ddbf10f`.
+- Fork comparado: `8df5b1664aff7e817b90ad11a15eb8a6ebbef0e4`.
+- Base Safe anterior: `f966a21cb6f8f0c45ede5f7ae71c9ce931d08f76` (historia remota).
+- MIT original conservada en LICENSE; atribución adicional del decodificador nativo en [UNIFIED_SCANNER.md](docs/UNIFIED_SCANNER.md), incluida en el artifact.
+
+La identidad Cargo permanece `aircard 1.2.4` por continuidad con la base; el binario se llama `AirCard-Safe.exe`. Cargo.lock se actualiza para ZIP 9.3.0 tras revisar sus avisos de seguridad. Los números de revisión describen los cambios de Safe.

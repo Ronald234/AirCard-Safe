@@ -1,3 +1,4 @@
+//! Legacy local files can be inspected for integrity, never used as recovery proof.
 use crate::{crypto, safety};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -5,6 +6,7 @@ use std::fs;
 use std::path::Path;
 
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Manifest {
     version: u32,
     // Pseudonymous linkage, no raw UDID, card hash, name or syslog.
@@ -21,7 +23,22 @@ fn binding(udid: &str, card: &str) -> Result<String> {
         .as_bytes(),
     )
 }
-pub fn load_original_assets(root: &Path, udid: &str, card: &str) -> Result<Vec<(String, Vec<u8>)>> {
+/// Refuse legacy local files as device originals. Hashes cannot establish provenance.
+pub fn load_original_assets(
+    _root: &Path,
+    _udid: &str,
+    _card: &str,
+) -> Result<Vec<(String, Vec<u8>)>> {
+    Err(anyhow::Error::msg(safety::RECOVERY_BLOCK_REASON))
+}
+
+/// Read-only integrity inspection; success is NOT original-artwork or recovery proof.
+/// Never feed these bytes to a device writer or treat the result as authorization.
+pub fn inspect_unverified_local_assets(
+    root: &Path,
+    udid: &str,
+    card: &str,
+) -> Result<Vec<(String, Vec<u8>)>> {
     ensure!(
         safety::valid_card_component(card),
         "Invalid card identifier"
@@ -71,8 +88,8 @@ mod tests {
     fn backup_rejects_incomplete_tampered_and_other_device() {
         let dir = std::env::temp_dir().join(format!("aircard-test-{}", crypto::token().unwrap()));
         fs::create_dir(&dir).unwrap();
-        let card = "OM6NYhwXMZrAw0sRUjR62wmF4ZQ=";
-        assert!(load_original_assets(&dir, "phone", card).is_err());
+        let card = "AAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        assert!(inspect_unverified_local_assets(&dir, "phone", card).is_err());
         let bytes: [&[u8]; 3] = [
             b"\x89PNG\r\n\x1a\nexample-a",
             b"\x89PNG\r\n\x1a\nexample-b",
@@ -91,10 +108,19 @@ mod tests {
             serde_json::to_vec(&manifest).unwrap(),
         )
         .unwrap();
-        assert_eq!(load_original_assets(&dir, "phone", card).unwrap().len(), 3);
-        assert!(load_original_assets(&dir, "other-phone", card).is_err());
+        assert_eq!(
+            inspect_unverified_local_assets(&dir, "phone", card)
+                .unwrap()
+                .len(),
+            3
+        );
+        assert!(
+            load_original_assets(&dir, "phone", card).is_err(),
+            "Self-authored manifest cannot establish original artwork provenance or recovery"
+        );
+        assert!(inspect_unverified_local_assets(&dir, "other-phone", card).is_err());
         fs::write(dir.join(safety::ARTWORK[0]), b"changed").unwrap();
-        assert!(load_original_assets(&dir, "phone", card).is_err());
+        assert!(inspect_unverified_local_assets(&dir, "phone", card).is_err());
         // Generated test fixture folder, no user input.
         fs::remove_dir_all(dir).unwrap();
     }

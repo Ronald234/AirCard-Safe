@@ -1,16 +1,23 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// Archival protocol implementations are tested but are not linked into the app.
+#[cfg(test)]
 mod afc;
+#[cfg(test)]
 mod airlift;
+#[cfg(test)]
 mod airtraffic;
 mod app;
 mod apple;
 mod crypto;
 mod device;
+mod diagnostics;
 mod flasher;
 mod image_skin;
+mod local_export;
 mod safety;
 mod scanner;
+#[cfg(test)]
 mod wallet_backup;
 
 fn main() -> eframe::Result<()> {
@@ -19,7 +26,8 @@ fn main() -> eframe::Result<()> {
             hash == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         }) && safety::usb_route_allowed(true, false)
             && !safety::usb_route_allowed(true, true)
-            && !safety::valid_target("/var/mobile/Library/Caches/TelephonyUI-10", "key.png");
+            && !safety::valid_target("/var/mobile/Library/Caches/TelephonyUI-10", "key.png")
+            && safety::require_verified_recovery().is_err();
         std::process::exit(if valid { 0 } else { 1 });
     }
     let options = eframe::NativeOptions {
@@ -27,7 +35,7 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1080.0, 760.0])
             .with_min_inner_size([880.0, 560.0])
-            .with_title("AirCard Safe - revision 3"),
+            .with_title("AirCard Safe - revision 4"),
         ..Default::default()
     };
 

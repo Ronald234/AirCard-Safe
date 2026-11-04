@@ -1,3 +1,5 @@
+> Revision 4: see SCANNER-DIAGNOSTICS.md for current classifications and diagnostics. All device mutations are blocked. The MIT attribution below remains applicable.
+
 # Native Wallet discovery references and limits
 
 `src/scanner/unified.rs` and `src/scanner/runtime.rs` adapt the unified-log
@@ -39,7 +41,7 @@ separately. A persistent negative return can keep an initialized scanner waiting
 until cancellation or its deadline; it is not reported as a confirmed timeout.
 
 Buffers are bounded: frames 16 MiB, decoded messages 64 KiB, legacy lines
-64 KiB, and retained distinct identifiers 256, with at most three classification emissions per identifier (768 total). Partial frames survive receive timeouts.
+64 KiB, and retained distinct identifiers 256, with at most seven classification emissions per identifier (1792 total). Partial frames survive retryable receive results; native negative-result causes remain unknown.
 Malformed lengths, unknown frames, truncated records and invalid slices are
 rejected. Diagnostics contain fixed status text, never raw device messages,
 pass names, identifiers, pairing data or credentials.

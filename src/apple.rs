@@ -1,20 +1,186 @@
 use std::ffi::{CStr, CString};
-use std::os::windows::ffi::OsStrExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result, bail};
 use libloading::{Library, Symbol};
 
+// Minimal advapi32 registry bindings used to locate the Microsoft Store
+// ("Apple Devices" / Store iTunes) package that ships the device DLLs.
+type HKey = *mut std::ffi::c_void;
+// Windows defines predefined handles by sign-extending a signed LONG.
+const HKEY_CURRENT_USER: HKey = 0x8000_0001u32 as i32 as isize as HKey;
+const KEY_READ: u32 = 0x2_0019;
+const ERROR_SUCCESS: i32 = 0;
+const REG_SZ: u32 = 1;
+
+#[link(name = "advapi32")]
 unsafe extern "system" {
-    fn SetDllDirectoryW(lpPathName: *const u16) -> i32;
+    fn RegOpenKeyExW(
+        hKey: HKey,
+        lpSubKey: *const u16,
+        ulOptions: u32,
+        samDesired: u32,
+        phkResult: *mut HKey,
+    ) -> i32;
+    fn RegEnumKeyExW(
+        hKey: HKey,
+        dwIndex: u32,
+        lpName: *mut u16,
+        lpcchName: *mut u32,
+        lpReserved: *mut u32,
+        lpClass: *mut u16,
+        lpcchClass: *mut u32,
+        lpftLastWriteTime: *mut std::ffi::c_void,
+    ) -> i32;
+    fn RegQueryValueExW(
+        hKey: HKey,
+        lpValueName: *const u16,
+        lpReserved: *mut u32,
+        lpType: *mut u32,
+        lpData: *mut u8,
+        lpcbData: *mut u32,
+    ) -> i32;
+    fn RegCloseKey(hKey: HKey) -> i32;
 }
 
 const APPLE_SUPPORT_DIRS: &[&str] = &[
     r"C:\Program Files\Common Files\Apple\Mobile Device Support",
     r"C:\Program Files (x86)\Common Files\Apple\Mobile Device Support",
 ];
+
+const APPMODEL_PACKAGES_KEY: &str = r"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages";
+const APPLE_PACKAGE_PREFIXES: &[&str] = &["AppleInc.AppleDevices", "AppleInc.iTunes"];
+
+fn to_wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Read a `REG_SZ` value from an open registry key.
+///
+/// # Safety
+/// `key` must be a valid handle opened with at least `KEY_QUERY_VALUE` access.
+unsafe fn reg_read_string(key: HKey, value_name: &str) -> Option<String> {
+    let name = to_wide(value_name);
+    let mut value_type: u32 = 0;
+    let mut size_bytes: u32 = 0;
+
+    let status = unsafe {
+        RegQueryValueExW(
+            key,
+            name.as_ptr(),
+            ptr::null_mut(),
+            &mut value_type,
+            ptr::null_mut(),
+            &mut size_bytes,
+        )
+    };
+    if status != ERROR_SUCCESS
+        || value_type != REG_SZ
+        || !(2..=65536).contains(&size_bytes)
+        || size_bytes % 2 != 0
+    {
+        return None;
+    }
+
+    let mut buffer = vec![0u8; size_bytes as usize];
+    let status = unsafe {
+        RegQueryValueExW(
+            key,
+            name.as_ptr(),
+            ptr::null_mut(),
+            &mut value_type,
+            buffer.as_mut_ptr(),
+            &mut size_bytes,
+        )
+    };
+    if status != ERROR_SUCCESS
+        || value_type != REG_SZ
+        || size_bytes as usize > buffer.len()
+        || size_bytes % 2 != 0
+    {
+        return None;
+    }
+
+    let (pairs, _) = buffer[..size_bytes as usize].as_chunks::<2>();
+    let u16_units: Vec<u16> = pairs
+        .iter()
+        .map(|&[lo, hi]| u16::from_le_bytes([lo, hi]))
+        .collect();
+    let text = String::from_utf16(&u16_units).ok()?;
+    let trimmed = text.trim_end_matches('\0');
+    if trimmed.is_empty() || trimmed.contains('\0') {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Discover install folders of registered MSIX packages whose name starts with
+/// one of `prefixes`, via `PackageRootFolder` in the per-user AppModel repo.
+fn msix_package_roots(prefixes: &[&str]) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    unsafe {
+        let mut repo_key: HKey = ptr::null_mut();
+        if RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            to_wide(APPMODEL_PACKAGES_KEY).as_ptr(),
+            0,
+            KEY_READ,
+            &mut repo_key,
+        ) != ERROR_SUCCESS
+        {
+            return roots;
+        }
+
+        let mut index: u32 = 0;
+        while index < 16384 {
+            let mut name_buf = [0u16; 512];
+            let mut name_len = name_buf.len() as u32;
+            let status = RegEnumKeyExW(
+                repo_key,
+                index,
+                name_buf.as_mut_ptr(),
+                &mut name_len,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+            );
+            if status != ERROR_SUCCESS {
+                break;
+            }
+            index += 1;
+
+            let package_name = String::from_utf16_lossy(&name_buf[..name_len as usize]);
+            if !prefixes
+                .iter()
+                .any(|p| package_name.starts_with(&format!("{p}_")))
+            {
+                continue;
+            }
+
+            let mut pkg_key: HKey = ptr::null_mut();
+            if RegOpenKeyExW(
+                repo_key,
+                to_wide(&package_name).as_ptr(),
+                0,
+                KEY_READ,
+                &mut pkg_key,
+            ) == ERROR_SUCCESS
+            {
+                if let Some(folder) = reg_read_string(pkg_key, "PackageRootFolder") {
+                    roots.push(PathBuf::from(folder));
+                }
+                RegCloseKey(pkg_key);
+            }
+        }
+
+        RegCloseKey(repo_key);
+    }
+    roots
+}
 
 pub type CFTypeRef = *const std::ffi::c_void;
 pub type CFStringRef = *const std::ffi::c_void;
@@ -52,6 +218,7 @@ pub type AMDeviceNotificationCallback =
 pub struct AppleLibraries {
     _cf_lib: Library,
     _md_lib: Library,
+    #[cfg(test)]
     _ath_lib: Library,
 
     // CoreFoundation functions
@@ -171,30 +338,56 @@ pub struct AppleLibraries {
     pub afc_remove_path: unsafe extern "C" fn(AFCConnectionRef, *const std::ffi::c_char) -> i32,
 
     // AirTrafficHost functions
+    #[cfg(test)]
     pub at_host_connection_create: unsafe extern "C" fn(CFStringRef) -> ATHostConnectionRef,
+    #[cfg(test)]
     pub at_host_connection_release: unsafe extern "C" fn(ATHostConnectionRef),
+    #[cfg(test)]
     pub at_host_connection_send_host_info:
         unsafe extern "C" fn(ATHostConnectionRef, CFDictionaryRef),
+    #[cfg(test)]
     pub at_host_connection_send_sync_request:
         unsafe extern "C" fn(ATHostConnectionRef, CFArrayRef, CFDictionaryRef, CFDictionaryRef),
+    #[cfg(test)]
     pub at_host_connection_send_metadata_sync_finished:
         unsafe extern "C" fn(ATHostConnectionRef, CFDictionaryRef, CFDictionaryRef),
+    #[cfg(test)]
     pub at_host_connection_send_asset_completed:
         unsafe extern "C" fn(ATHostConnectionRef, CFStringRef, CFStringRef, CFStringRef),
+    #[cfg(test)]
     pub at_host_connection_read_message:
         unsafe extern "C" fn(ATHostConnectionRef) -> CFDictionaryRef,
+    #[cfg(test)]
     pub at_cf_message_get_name: unsafe extern "C" fn(CFDictionaryRef) -> CFStringRef,
+    #[cfg(test)]
     pub at_cf_message_get_param: unsafe extern "C" fn(CFDictionaryRef, CFStringRef) -> CFTypeRef,
 }
 
 static LIBRARIES: OnceLock<Arc<AppleLibraries>> = OnceLock::new();
 
 pub fn locate_support_dir() -> Option<PathBuf> {
-    APPLE_SUPPORT_DIRS.iter().map(PathBuf::from).find(|dir| {
-        dir.join("CoreFoundation.dll").is_file()
-            && dir.join("MobileDevice.dll").is_file()
-            && dir.join("AirTrafficHost.dll").is_file()
-    })
+    APPLE_SUPPORT_DIRS
+        .iter()
+        .map(PathBuf::from)
+        .chain(
+            msix_package_roots(APPLE_PACKAGE_PREFIXES)
+                .into_iter()
+                .filter(|root| is_apple_store_root(root))
+                .filter_map(|root| root.canonicalize().ok())
+                .filter(|root| is_apple_store_root(root))
+                .flat_map(|root| [root.join("AMDS64"), root])
+                .filter_map(|candidate| candidate.canonicalize().ok())
+                .filter(|candidate| {
+                    is_apple_store_root(candidate)
+                        || candidate.file_name().is_some_and(|name| name == "AMDS64")
+                            && candidate.parent().is_some_and(is_apple_store_root)
+                }),
+        )
+        .find(|dir| has_required_dlls(dir))
+}
+
+fn has_required_dlls(dir: &Path) -> bool {
+    dir.join("CoreFoundation.dll").is_file() && dir.join("MobileDevice.dll").is_file()
 }
 
 pub fn get_apple_libraries() -> Result<Arc<AppleLibraries>> {
@@ -203,27 +396,21 @@ pub fn get_apple_libraries() -> Result<Arc<AppleLibraries>> {
     }
 
     let dir = locate_support_dir().context(
-        "Apple Mobile Device Support was not found. Install 64-bit iTunes package from Apple.",
+        "Apple Mobile Device Support was not found. Install Apple Devices or the 64-bit iTunes package from Apple.",
     )?;
-
-    // Configure Windows DLL search directory so dependent DLLs (e.g. objc, pthread, SQLite) are resolved
-    let wide_dir: Vec<u16> = dir
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    unsafe {
-        SetDllDirectoryW(wide_dir.as_ptr());
-    }
 
     let cf_path = dir.join("CoreFoundation.dll");
     let md_path = dir.join("MobileDevice.dll");
+    #[cfg(test)]
     let ath_path = dir.join("AirTrafficHost.dll");
 
     unsafe {
-        let cf_lib = Library::new(&cf_path).context("Failed to load CoreFoundation.dll")?;
-        let md_lib = Library::new(&md_path).context("Failed to load MobileDevice.dll")?;
-        let ath_lib = Library::new(&ath_path).context("Failed to load AirTrafficHost.dll")?;
+        let cf_lib = load_support_library(&cf_path).context("Failed to load CoreFoundation.dll from the installed Apple runtime. If Store package access is denied, install Apple's standalone 64-bit Mobile Device Support runtime.")?;
+        let md_lib = load_support_library(&md_path)
+            .context("Failed to load MobileDevice.dll from the installed Apple runtime")?;
+        #[cfg(test)]
+        let ath_lib =
+            load_support_library(&ath_path).context("Failed to load AirTrafficHost.dll")?;
 
         macro_rules! load_sym {
             ($lib:expr, $name:expr) => {{
@@ -295,22 +482,32 @@ pub fn get_apple_libraries() -> Result<Arc<AppleLibraries>> {
         let afc_directory_create = load_sym!(md_lib, "AFCDirectoryCreate");
         let afc_remove_path = load_sym!(md_lib, "AFCRemovePath");
 
+        #[cfg(test)]
         let at_host_connection_create = load_sym!(ath_lib, "ATHostConnectionCreate");
+        #[cfg(test)]
         let at_host_connection_release = load_sym!(ath_lib, "ATHostConnectionRelease");
+        #[cfg(test)]
         let at_host_connection_send_host_info = load_sym!(ath_lib, "ATHostConnectionSendHostInfo");
+        #[cfg(test)]
         let at_host_connection_send_sync_request =
             load_sym!(ath_lib, "ATHostConnectionSendSyncRequest");
+        #[cfg(test)]
         let at_host_connection_send_metadata_sync_finished =
             load_sym!(ath_lib, "ATHostConnectionSendMetadataSyncFinished");
+        #[cfg(test)]
         let at_host_connection_send_asset_completed =
             load_sym!(ath_lib, "ATHostConnectionSendAssetCompleted");
+        #[cfg(test)]
         let at_host_connection_read_message = load_sym!(ath_lib, "ATHostConnectionReadMessage");
+        #[cfg(test)]
         let at_cf_message_get_name = load_sym!(ath_lib, "ATCFMessageGetName");
+        #[cfg(test)]
         let at_cf_message_get_param = load_sym!(ath_lib, "ATCFMessageGetParam");
 
         let apple_libs = Arc::new(AppleLibraries {
             _cf_lib: cf_lib,
             _md_lib: md_lib,
+            #[cfg(test)]
             _ath_lib: ath_lib,
 
             cf_string_create,
@@ -368,14 +565,23 @@ pub fn get_apple_libraries() -> Result<Arc<AppleLibraries>> {
             afc_directory_create,
             afc_remove_path,
 
+            #[cfg(test)]
             at_host_connection_create,
+            #[cfg(test)]
             at_host_connection_release,
+            #[cfg(test)]
             at_host_connection_send_host_info,
+            #[cfg(test)]
             at_host_connection_send_sync_request,
+            #[cfg(test)]
             at_host_connection_send_metadata_sync_finished,
+            #[cfg(test)]
             at_host_connection_send_asset_completed,
+            #[cfg(test)]
             at_host_connection_read_message,
+            #[cfg(test)]
             at_cf_message_get_name,
+            #[cfg(test)]
             at_cf_message_get_param,
         });
 
@@ -510,4 +716,69 @@ pub fn verify_support() -> Result<String> {
         "Apple Mobile Device Support ready: {}",
         dir.display()
     ))
+}
+
+fn is_apple_store_root(root: &Path) -> bool {
+    let text = root.to_string_lossy();
+    let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+    let root = Path::new(text);
+    let Some(name) = root.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    root.parent()
+        .is_some_and(|parent| parent == Path::new(r"C:\Program Files\WindowsApps"))
+        && APPLE_PACKAGE_PREFIXES
+            .iter()
+            .any(|prefix| name.starts_with(&format!("{prefix}_")))
+        && name.ends_with("_x64__nzyj5cx40ttqa")
+        && !root
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+}
+
+unsafe fn load_support_library(path: &Path) -> Result<Library> {
+    use libloading::os::windows::{
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32, Library as WindowsLibrary,
+    };
+    anyhow::ensure!(
+        path.is_absolute(),
+        "Apple runtime DLL path must be absolute"
+    );
+    // Never search the working directory, PATH or an application-owned DLL cache.
+    let library = unsafe {
+        WindowsLibrary::load_with_flags(
+            path,
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32,
+        )
+    }?;
+    Ok(library.into())
+}
+
+#[cfg(test)]
+mod support_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn predefined_registry_handle_sign_extends_on_64_bit_windows() {
+        assert_eq!(HKEY_CURRENT_USER as usize, (-2147483647isize) as usize);
+    }
+
+    #[test]
+    fn accepts_only_protected_apple_store_package_roots() {
+        assert!(is_apple_store_root(Path::new(
+            r"C:\Program Files\WindowsApps\AppleInc.AppleDevices_1.0.0.0_x64__nzyj5cx40ttqa"
+        )));
+        assert!(is_apple_store_root(Path::new(
+            r"C:\Program Files\WindowsApps\AppleInc.iTunes_1.0.0.0_x64__nzyj5cx40ttqa"
+        )));
+        for path in [
+            r"C:\Users\Public\AppleInc.AppleDevices_1.0.0.0_x64__nzyj5cx40ttqa",
+            r"C:\Program Files\WindowsApps\AppleInc.AppleDevicesEvil_1.0.0.0_x64__nzyj5cx40ttqa",
+            r"C:\Program Files\WindowsApps\AppleInc.AppleDevices_1.0.0.0_x64__otherpublisher",
+            r"C:\Program Files\WindowsApps\AppleInc.AppleDevices_1.0.0.0_x64__nzyj5cx40ttqa\..\Untrusted",
+        ] {
+            assert!(!is_apple_store_root(Path::new(path)));
+        }
+    }
 }
