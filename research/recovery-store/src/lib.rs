@@ -140,13 +140,13 @@ fn capture_impl(
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     directories_only(parent)?;
-    let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
+        fs::DirBuilder::new().mode(0o700).create(root)?;
     }
-    builder.create(root)?; // Existing directories are never reused or overwritten.
+    #[cfg(not(unix))]
+    fs::create_dir(root)?; // Existing directories are never reused or overwritten.
     directories_only(root)?;
     let mut entries: [Option<Entry>; 3] = [None, None, None];
     for (index, data) in assets.into_iter().enumerate() {

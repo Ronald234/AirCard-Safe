@@ -31,7 +31,7 @@ Its tests can establish local integrity and failure behavior only. The component
 
 ## Conditions before enabling a writer
 
-1. Obtain actual original image bytes through a reviewed method. The reviewed MOVE exporters do not satisfy the requested non-destructive acquisition requirement.
+1. Obtain actual original image bytes through a reviewed method. A non-destructive read is the preferred research route. A MOVE-based candidate would instead need a durable recovery intent saved before acquisition and demonstrated interruption/reconnect recovery; the reviewed source alone is not that evidence.
 2. Preserve originals and every auxiliary preimage a chosen method would change, including cache/Books state if applicable. The three-slot laboratory alone is insufficient for that scope.
 3. Validate restart/reconnect recovery, exact destination readback, concurrent-change conflicts, cleanup ordering and loss of power on Windows with a physical test device.
 4. Distinguish original acquisition, local integrity, destination restoration and visible Wallet rendering. Evidence for one must never authorize the others.
