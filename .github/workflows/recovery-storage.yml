@@ -1,0 +1,64 @@
+name: Recovery storage research
+on:
+  push:
+    branches: ['research/recovery-storage']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  storage:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Rust tools
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Format
+        run: cargo fmt --manifest-path research/recovery-store/Cargo.toml -- --check
+      - name: Full storage test suite
+        shell: pwsh
+        run: |
+          cargo test --locked --manifest-path research/recovery-store/Cargo.toml 2>&1 | Tee-Object storage-tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Static checks
+        shell: pwsh
+        run: |
+          cargo clippy --locked --manifest-path research/recovery-store/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Release library build
+        run: cargo build --locked --release --manifest-path research/recovery-store/Cargo.toml
+      - name: Research results, not an application release
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: recovery-storage-tests-${{ matrix.os }}
+          path: storage-tests.log
+          if-no-files-found: ignore
+          retention-days: 30
+  unchanged-application-regression:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Existing application tests, without an iPhone
+        shell: pwsh
+        run: |
+          cargo test --locked 2>&1 | Tee-Object existing-application-tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unchanged-application-test-results
+          path: existing-application-tests.log
+          if-no-files-found: ignore
+          retention-days: 30
