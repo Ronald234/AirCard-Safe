@@ -6,6 +6,8 @@ Aplicación nativa de Windows para diagnosticar la detección de Apple Wallet po
 
 ## Descargar el ejecutable
 
+**[Descargar revisión 4 verificada](https://github.com/Ronald234/AirCard-Safe/actions/runs/41754963135/artifacts/13288007407)**. La ejecución de Windows terminó correctamente; el SHA-256 y los resultados están en [STATUS.md](docs/STATUS.md).
+
 En [Actions: AirCard Safe Windows](https://github.com/Ronald234/AirCard-Safe/actions/workflows/build.yml), abre la ejecución correcta de esta revisión que termine en **success** y descarga **AirCard-Safe-Windows-x64**. Extrae el ZIP y abre **AirCard-Safe.exe**. El paquete incluye `SHA256SUMS.txt`, `build-info.json`, los resultados de pruebas y documentación. Los artifacts caducan a los 30 días; GitHub puede exigir iniciar sesión.
 
 Verifica en PowerShell: `Get-FileHash .\AirCard-Safe.exe -Algorithm SHA256`. Debe coincidir con `SHA256SUMS.txt`. El SHA-256 comprueba integridad; el programa no tiene firma de código.

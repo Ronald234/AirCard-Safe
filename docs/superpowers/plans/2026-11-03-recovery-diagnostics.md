@@ -15,7 +15,7 @@
 - [x] Validate transport changes with protocol-level tests; no unverified Grappa fallback or session behavior may authorize writes.
 - [x] Add compatibility/security documentation and Windows CI checks/artifact packaging with SHA-256 and real PE validation.
 - [x] Run formatting, cargo test --locked, cargo build --locked --release, security/static checks and actual Windows binary/self-check verification. Review changes and correct failures.
-- [ ] Commit and publish source, run Windows Actions and report its actual conclusion, downloadable artifact, checksum and remaining physical-device/recovery limitations.
+- [x] Commit and publish source, run Windows Actions and report its actual conclusion, downloadable artifact, checksum and remaining physical-device/recovery limitations.
 
 ## Review focus
 

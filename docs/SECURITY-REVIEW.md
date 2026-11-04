@@ -29,3 +29,7 @@ Clippy correctness analysis and a dependency-tree inventory are included in CI. 
 Some native secure-receive calls may ignore the socket deadline; the application can request cancellation but cannot guarantee an absolute timeout. A build/self-check does not exercise those calls on a real phone. Authentication, banking data, NFC keys and access credentials are never requested or modified by this revision.
 
 The executable is unsigned. Use its artifact checksum for integrity, and download from the repository's actual successful workflow run. This does not establish publisher identity or eliminate antivirus false positives.
+
+## Supplementary audit execution block
+
+The supplementary cargo-audit 0.22.2 attempt could not be verified complete. Initial tool compilation failed on temporary-output access; a retry used a project-local build directory, but the command environment subsequently rejected an invalid Linux-style sandbox URI on Windows. This remains a documented verification gap. Full locked tests, Clippy correctness analysis, release compilation, PE checks and GUI smoke checks passed in Windows Actions. Exact results and executable SHA-256 are in STATUS.md.
