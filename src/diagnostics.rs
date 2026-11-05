@@ -29,6 +29,7 @@ pub struct DiagnosticSnapshot {
     pub wallet_related: u32,
     pub redacted: u32,
     pub no_identifier: u32,
+    pub unmatched_events: UnmatchedEvents,
     pub recognized: RecognizedKinds,
     pub source: LogSource,
     pub unavailable_sources: u32,
@@ -40,6 +41,28 @@ pub struct DiagnosticSnapshot {
     pub stream_failed: bool,
 }
 
+/// Mutually exclusive reasons for events from which the parser extracted no item.
+/// A redaction marker anywhere in an event does not prove its identifier was redacted.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct UnmatchedEvents {
+    pub redaction_marker_present: u32,
+    pub known_shape_without_item: u32,
+    pub other_shape: u32,
+}
+
+impl DiagnosticSnapshot {
+    pub(crate) fn record_unmatched(&mut self, redacted: bool, known_shape: bool) {
+        let count = if redacted {
+            &mut self.unmatched_events.redaction_marker_present
+        } else if known_shape {
+            &mut self.unmatched_events.known_shape_without_item
+        } else {
+            &mut self.unmatched_events.other_shape
+        };
+        increment(count);
+    }
+}
+
 pub(crate) fn increment(count: &mut u32) {
     *count = count.saturating_add(1).min(MAX_COUNT);
 }
@@ -49,13 +72,13 @@ impl DiagnosticSnapshot {
         if self.source == LogSource::None && self.unavailable_sources > 0 {
             "La fuente de registros no estuvo disponible. No se puede determinar el estado del pase."
         } else if self.stream_failed || self.invalid_frames > 0 || self.receive_unavailable > 0 {
-            "La lectura de registros quedó incompleta. Repite el escaneo; esto no demuestra compatibilidad del pase."
+            "La lectura de registros qued� incompleta. Repite el escaneo; esto no demuestra compatibilidad del pase."
         } else if self.wallet_related == 0 {
-            "No se observaron eventos de Wallet. Esto no demuestra que el pase esté ausente."
+            "No se observaron eventos de Wallet. Esto no demuestra que el pase est� ausente."
         } else if self.redacted > 0 && self.no_identifier > 0 {
             "Se observaron datos ocultos y eventos sin identificador utilizable. Los datos privados no se recuperan."
         } else if self.no_identifier > 0 {
-            "Algunos eventos de Wallet no tenían identificador utilizable. Esos eventos no permiten determinar el tipo de pase."
+            "Algunos eventos de Wallet no ten�an identificador utilizable. Esos eventos no permiten determinar el tipo de pase."
         } else if [
             self.recognized.generic,
             self.recognized.loyalty,
@@ -66,9 +89,9 @@ impl DiagnosticSnapshot {
         .iter()
         .any(|count| *count > 0)
         {
-            "Se observó un tipo de pase explícito o un contexto de imagen incompatible. Sigue en modo de solo lectura; detectarlo no demuestra compatibilidad."
+            "Se observ� un tipo de pase expl�cito o un contexto de imagen incompatible. Sigue en modo de solo lectura; detectarlo no demuestra compatibilidad."
         } else {
-            "Se observaron candidatos de Wallet. Un identificador o una ruta de caché no confirma funciones de pago, NFC, código de barras o acceso."
+            "Se observaron candidatos de Wallet. Un identificador o una ruta de cach� no confirma funciones de pago, NFC, c�digo de barras o acceso."
         }
     }
 }
@@ -81,6 +104,9 @@ pub fn export_json(snapshot: &DiagnosticSnapshot) -> serde_json::Result<String> 
         &mut safe.wallet_related,
         &mut safe.redacted,
         &mut safe.no_identifier,
+        &mut safe.unmatched_events.redaction_marker_present,
+        &mut safe.unmatched_events.known_shape_without_item,
+        &mut safe.unmatched_events.other_shape,
         &mut safe.unavailable_sources,
         &mut safe.invalid_frames,
         &mut safe.oversized_records,
@@ -102,6 +128,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unmatched_reasons_are_exclusive_bounded_and_do_not_claim_private_id() {
+        let mut snapshot = DiagnosticSnapshot::default();
+        snapshot.record_unmatched(true, true);
+        snapshot.record_unmatched(false, true);
+        snapshot.record_unmatched(false, false);
+        assert_eq!(snapshot.unmatched_events.redaction_marker_present, 1);
+        assert_eq!(snapshot.unmatched_events.known_shape_without_item, 1);
+        assert_eq!(snapshot.unmatched_events.other_shape, 1);
+        snapshot.unmatched_events.other_shape = u32::MAX;
+        let value: serde_json::Value =
+            serde_json::from_str(&export_json(&snapshot).unwrap()).unwrap();
+        assert_eq!(value["unmatched_events"]["other_shape"], MAX_COUNT);
+    }
+
+    #[test]
     fn diagnostics_export_accepts_only_closed_aggregate_fields_and_bounds_counts() {
         let snapshot = DiagnosticSnapshot {
             lines_received: u32::MAX,
@@ -110,7 +151,7 @@ mod tests {
         let json = export_json(&snapshot).unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(value["lines_received"], 1_000_000);
-        assert_eq!(value.as_object().unwrap().len(), 13);
+        assert_eq!(value.as_object().unwrap().len(), 14);
         assert!(value.get("raw").is_none());
     }
     #[test]

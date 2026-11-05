@@ -70,12 +70,25 @@ fn observe_line(
     }
     increment(&mut diagnostics.wallet_related);
     let lower = line.to_ascii_lowercase();
-    if lower.contains("<private>") || lower.contains("<redacted>") {
+    let redacted = lower.contains("<private>") || lower.contains("<redacted>");
+    if redacted {
         increment(&mut diagnostics.redacted);
     }
     let items = extract_wallet_items(line);
     if items.is_empty() {
         increment(&mut diagnostics.no_identifier);
+        let known_shape = [
+            "selected pass uniqueid",
+            "pdcardfilemanager:",
+            "pdpasslibrary:",
+            "verificationcheck.",
+            "dashboard loading",
+            "passids[insession]",
+            "/cards/",
+        ]
+        .iter()
+        .any(|marker| lower.contains(marker));
+        diagnostics.record_unmatched(redacted, known_shape);
     }
     for mut item in items {
         if let WalletItem::ClassifiedPass(id, kind) = &item {
@@ -111,6 +124,35 @@ fn observe_line(
             increment(count);
             on_item(item);
         }
+    }
+}
+
+#[cfg(test)]
+mod unmatched_event_tests {
+    use super::*;
+    #[test]
+    fn unmatched_events_export_reasons_without_device_text() {
+        let mut seen = Observations::default();
+        let mut snapshot = DiagnosticSnapshot::default();
+        for line in [
+            "passd: selected pass uniqueID : <private> secret=DO_NOT_EXPORT",
+            "passd: selected pass uniqueID : ??? secret=DO_NOT_EXPORT",
+            "passd: new event shape secret=DO_NOT_EXPORT",
+            "other: secret=DO_NOT_EXPORT",
+        ] {
+            observe_line(line, &mut seen, &mut snapshot, &mut |_| {
+                panic!("unexpected item")
+            });
+        }
+        assert_eq!(snapshot.no_identifier, 3);
+        assert_eq!(snapshot.unmatched_events.redaction_marker_present, 1);
+        assert_eq!(snapshot.unmatched_events.known_shape_without_item, 1);
+        assert_eq!(snapshot.unmatched_events.other_shape, 1);
+        assert!(
+            !crate::diagnostics::export_json(&snapshot)
+                .unwrap()
+                .contains("DO_NOT_EXPORT")
+        );
     }
 }
 
@@ -296,10 +338,10 @@ fn scan_inner(
     if !keep_reading() {
         return Ok(());
     }
-    log("Conectando al escáner USB de Wallet...".into());
+    log("Conectando al esc�ner USB de Wallet...".into());
     let session = ActiveDeviceSession::open(udid, connection_mode).map_err(|_| {
         anyhow::anyhow!(
-            "No se pudo abrir una sesión USB verificada. Reconecta y desbloquea el iPhone y acepta la confianza."
+            "No se pudo abrir una sesi�n USB verificada. Reconecta y desbloquea el iPhone y acepta la confianza."
         )
     })?;
     if !keep_reading() {
@@ -335,7 +377,7 @@ fn scan_inner(
                 Err(_) => {
                     increment(&mut diagnostics.invalid_frames);
                     bail!(
-                        "La lectura de Wallet terminó o recibió un registro inválido. Conecta de nuevo y repite el escaneo."
+                        "La lectura de Wallet termin� o recibi� un registro inv�lido. Conecta de nuevo y repite el escaneo."
                     );
                 }
             }
@@ -345,7 +387,7 @@ fn scan_inner(
         // Startup-only fallback: never change transport or silently restart a live scan.
         drop(service);
         log(
-            "Los registros unificados no están disponibles. Probando la fuente USB anterior."
+            "Los registros unificados no est�n disponibles. Probando la fuente USB anterior."
                 .into(),
         );
         let mut legacy = Service::open(&session, "com.apple.syslog_relay", receive_unavailable)
@@ -363,7 +405,7 @@ fn scan_inner(
         while keep_reading() {
             match legacy.read(&mut buffer) {
                 Ok(0) => bail!(
-                    "La fuente de registros de Wallet terminó. Reconecta y repite el escaneo."
+                    "La fuente de registros de Wallet termin�. Reconecta y repite el escaneo."
                 ),
                 Ok(count) => {
                     for &byte in &buffer[..count] {
