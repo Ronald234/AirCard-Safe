@@ -36,14 +36,13 @@ fn each_layout_selects_only_its_existing_image_families() {
             br#"{"storeCard":{}}"#.as_slice(),
             vec!["logo.png", "strip.png"],
         ),
-        (br#"{"coupon":{}}"#.as_slice(), vec!["logo.png", "strip.png"]),
+        (
+            br#"{"coupon":{}}"#.as_slice(),
+            vec!["logo.png", "strip.png"],
+        ),
         (
             br#"{"boardingPass":{}}"#.as_slice(),
             vec!["footer.png", "logo.png"],
-        ),
-        (
-            br#"{"eventTicket":{}}"#.as_slice(),
-            vec!["background.png", "logo.png", "strip.png", "thumbnail.png"],
         ),
     ] {
         let inventory = inspect(
@@ -114,4 +113,41 @@ fn paths_aliases_and_missing_images_are_not_silently_guessed() {
         inspect(br#"{"generic":{}}"#, &vec!["logo.png"; 513]),
         Err(InventoryError::InvalidInventory)
     );
+}
+
+#[test]
+fn modern_layouts_cannot_be_mistaken_for_their_classic_fallback() {
+    for metadata in [
+        br#"{"generic":{},"posterGeneric":{}}"#.as_slice(),
+        br#"{"eventTicket":{},"preferredStyleSchemes":["posterEventTicket"]}"#.as_slice(),
+    ] {
+        assert_eq!(
+            inspect(metadata, &["logo.png"]),
+            Err(InventoryError::UnsupportedLayout)
+        );
+    }
+}
+
+#[test]
+fn event_artwork_requires_an_unambiguous_supported_combination() {
+    let metadata = br#"{"eventTicket":{}}"#;
+    assert_eq!(
+        inspect(metadata, &["logo.png", "strip.png"]).unwrap().images,
+        vec!["logo.png", "strip.png"]
+    );
+    assert_eq!(
+        inspect(metadata, &["background@2x.png", "thumbnail.png"])
+            .unwrap()
+            .images,
+        vec!["background@2x.png", "thumbnail.png"]
+    );
+    for names in [
+        vec!["strip@2x.png", "background.png"],
+        vec!["strip.png", "thumbnail@3x.png"],
+    ] {
+        assert_eq!(
+            inspect(metadata, &names),
+            Err(InventoryError::InvalidInventory)
+        );
+    }
 }

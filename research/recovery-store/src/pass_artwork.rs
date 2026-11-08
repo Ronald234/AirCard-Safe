@@ -38,7 +38,10 @@ impl<'de> Deserialize<'de> for Object {
                 formatter.write_str("an object")
             }
             fn visit_map<M: de::MapAccess<'de>>(self, mut map: M) -> Result<Object, M::Error> {
-                while map.next_entry::<de::IgnoredAny, de::IgnoredAny>()?.is_some() {}
+                while map
+                    .next_entry::<de::IgnoredAny, de::IgnoredAny>()?
+                    .is_some()
+                {}
                 Ok(Object)
             }
         }
