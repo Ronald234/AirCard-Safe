@@ -93,6 +93,8 @@ fn paths_aliases_and_missing_images_are_not_silently_guessed() {
         vec!["folder/strip.png"],
         vec!["C:strip.png"],
         vec!["strip.png", "STRIP.PNG"],
+        vec!["strip.png", "strip.png."],
+        vec!["strip.png", "strip.png "],
         vec!["strip.png", "strip.png"],
         vec!["strip.png\0"],
     ] {
