@@ -68,17 +68,30 @@ pub(crate) fn increment(count: &mut u32) {
 }
 
 impl DiagnosticSnapshot {
-    pub fn explanation(&self) -> &'static str {
+    pub fn explanation(&self) -> String {
+        let observation = self.observation_explanation();
+        if self.receive_unavailable > 0 && !self.stream_failed && self.invalid_frames == 0 {
+            format!(
+                "{observation} Hubo reintentos de recepción: por sí solos no prueban pérdida de eventos ni una desconexión. Tampoco garantizan que la captura sea completa."
+            )
+        } else {
+            observation.into()
+        }
+    }
+
+    fn observation_explanation(&self) -> &'static str {
         if self.source == LogSource::None && self.unavailable_sources > 0 {
             "La fuente de registros no estuvo disponible. No se puede determinar el estado del pase."
-        } else if self.stream_failed || self.invalid_frames > 0 || self.receive_unavailable > 0 {
-            "La lectura de registros qued� incompleta. Repite el escaneo; esto no demuestra compatibilidad del pase."
+        } else if self.stream_failed || self.invalid_frames > 0 {
+            "La lectura de registros quedó incompleta. Repite el escaneo; esto no demuestra compatibilidad del pase."
         } else if self.wallet_related == 0 {
-            "No se observaron eventos de Wallet. Esto no demuestra que el pase est� ausente."
+            "No se observaron eventos de Wallet. Esto no demuestra que el pase esté ausente."
+        } else if self.unmatched_events.known_shape_without_item > 0 {
+            "Hay eventos con patrones conocidos de Wallet de los que el detector no extrajo un identificador utilizable. Puede faltar un dato o no coincidir el formato esperado; no demuestra que el pase esté ausente ni permite habilitar su edición."
         } else if self.redacted > 0 && self.no_identifier > 0 {
             "Se observaron datos ocultos y eventos sin identificador utilizable. Los datos privados no se recuperan."
         } else if self.no_identifier > 0 {
-            "Algunos eventos de Wallet no ten�an identificador utilizable. Esos eventos no permiten determinar el tipo de pase."
+            "Algunos eventos de Wallet no tenían identificador utilizable. Esos eventos no permiten determinar el tipo de pase."
         } else if [
             self.recognized.generic,
             self.recognized.loyalty,
@@ -89,9 +102,9 @@ impl DiagnosticSnapshot {
         .iter()
         .any(|count| *count > 0)
         {
-            "Se observ� un tipo de pase expl�cito o un contexto de imagen incompatible. Sigue en modo de solo lectura; detectarlo no demuestra compatibilidad."
+            "Se observó un tipo de pase explícito o un contexto de imagen incompatible. Sigue en modo de solo lectura; detectarlo no demuestra compatibilidad."
         } else {
-            "Se observaron candidatos de Wallet. Un identificador o una ruta de cach� no confirma funciones de pago, NFC, c�digo de barras o acceso."
+            "Se observaron candidatos de Wallet. Un identificador o una ruta de caché no confirma funciones de pago, NFC, código de barras o acceso."
         }
     }
 }
@@ -173,18 +186,42 @@ mod tests {
 mod unavailable_receive_tests {
     use super::*;
     #[test]
-    fn native_receive_failures_mark_observation_incomplete_without_guessing_the_cause() {
+    fn retryable_receive_results_do_not_prove_missing_events() {
         let snapshot = DiagnosticSnapshot {
             receive_unavailable: 4,
             source: LogSource::Unified,
             ..Default::default()
         };
-        assert!(snapshot.explanation().contains("incompleta"));
-        assert!(!snapshot.explanation().contains("desconect"));
+        assert!(!snapshot.explanation().contains("incompleta"));
+        assert!(snapshot.explanation().contains("reintentos"));
+        assert!(!snapshot.explanation().contains("se desconectó"));
         assert!(
             export_json(&snapshot)
                 .unwrap()
                 .contains("\"receive_unavailable\": 4")
         );
+    }
+
+    #[test]
+    fn parser_evidence_is_not_hidden_by_redaction_or_receive_retries() {
+        let mut snapshot = DiagnosticSnapshot {
+            wallet_related: 10,
+            no_identifier: 8,
+            redacted: 2,
+            receive_unavailable: 1,
+            source: LogSource::Unified,
+            unmatched_events: UnmatchedEvents {
+                known_shape_without_item: 3,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(snapshot.explanation().contains("patrones conocidos"));
+        assert!(snapshot.explanation().contains("reintentos"));
+        snapshot.stream_failed = true;
+        assert!(snapshot.explanation().contains("incompleta"));
+        snapshot.stream_failed = false;
+        snapshot.invalid_frames = 1;
+        assert!(snapshot.explanation().contains("incompleta"));
     }
 }
