@@ -52,6 +52,7 @@ impl<'de> Deserialize<'de> for Object {
 struct Header {
     layout: Option<Layout>,
     nfc_declared: bool,
+    unsupported_style: bool,
 }
 impl<'de> Deserialize<'de> for Header {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -66,6 +67,7 @@ impl<'de> Deserialize<'de> for Header {
                 let mut header = Header {
                     layout: None,
                     nfc_declared: false,
+                    unsupported_style: false,
                 };
                 while let Some(key) = map.next_key::<String>()? {
                     if seen.len() >= 256 || !seen.insert(key.clone()) {
@@ -84,6 +86,11 @@ impl<'de> Deserialize<'de> for Header {
                         if header.layout.replace(layout).is_some() {
                             return Err(de::Error::custom("conflicting layouts"));
                         }
+                    } else if ["posterGeneric", "posterEventTicket", "preferredStyleSchemes"]
+                        .contains(&key.as_str())
+                    {
+                        map.next_value::<de::IgnoredAny>()?;
+                        header.unsupported_style = true;
                     } else if key == "nfc" {
                         map.next_value::<Object>()?;
                         header.nfc_declared = true;
@@ -107,6 +114,9 @@ pub fn inspect(metadata: &[u8], names: &[&str]) -> Result<VisualInventory, Inven
     }
     let header: Header =
         serde_json::from_slice(metadata).map_err(|_| InventoryError::InvalidMetadata)?;
+    if header.unsupported_style {
+        return Err(InventoryError::UnsupportedLayout);
+    }
     let layout = header.layout.ok_or(InventoryError::UnsupportedLayout)?;
     if names.len() > 512 {
         return Err(InventoryError::InvalidInventory);
@@ -116,6 +126,7 @@ pub fn inspect(metadata: &[u8], names: &[&str]) -> Result<VisualInventory, Inven
         if name.is_empty()
             || name.len() > 128
             || matches!(*name, "." | "..")
+            || name.ends_with(['.', ' '])
             || name.chars().any(|c| c.is_control() || "/\\:".contains(c))
             || !seen.insert(name.to_ascii_lowercase())
         {
@@ -136,6 +147,14 @@ pub fn inspect(metadata: &[u8], names: &[&str]) -> Result<VisualInventory, Inven
                 images.push(leaf);
             }
         }
+    }
+    if layout == Layout::EventTicket
+        && images.iter().any(|name| name.starts_with("strip"))
+        && images
+            .iter()
+            .any(|name| name.starts_with("background") || name.starts_with("thumbnail"))
+    {
+        return Err(InventoryError::InvalidInventory);
     }
     images.sort();
     if images.is_empty() {
