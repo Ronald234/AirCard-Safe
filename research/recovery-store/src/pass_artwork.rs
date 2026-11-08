@@ -86,8 +86,12 @@ impl<'de> Deserialize<'de> for Header {
                         if header.layout.replace(layout).is_some() {
                             return Err(de::Error::custom("conflicting layouts"));
                         }
-                    } else if ["posterGeneric", "posterEventTicket", "preferredStyleSchemes"]
-                        .contains(&key.as_str())
+                    } else if [
+                        "posterGeneric",
+                        "posterEventTicket",
+                        "preferredStyleSchemes",
+                    ]
+                    .contains(&key.as_str())
                     {
                         map.next_value::<de::IgnoredAny>()?;
                         header.unsupported_style = true;

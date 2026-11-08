@@ -134,7 +134,9 @@ fn modern_layouts_cannot_be_mistaken_for_their_classic_fallback() {
 fn event_artwork_requires_an_unambiguous_supported_combination() {
     let metadata = br#"{"eventTicket":{}}"#;
     assert_eq!(
-        inspect(metadata, &["logo.png", "strip.png"]).unwrap().images,
+        inspect(metadata, &["logo.png", "strip.png"])
+            .unwrap()
+            .images,
         vec!["logo.png", "strip.png"]
     );
     assert_eq!(
