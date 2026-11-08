@@ -6,10 +6,10 @@ Architecture: parse bounded caller-supplied metadata into one explicit pass layo
 
 Files: research/recovery-store/src/pass_artwork.rs; research/recovery-store/tests/pass_artwork.rs; .github/workflows/pass-artwork.yml.
 
-- [ ] Establish failing behavioral tests on Windows and Linux.
-- [ ] Implement bounded metadata parsing with duplicate rejection, fixed errors and no sensitive output.
-- [ ] Implement layout-specific selection from existing filenames, rejecting traversal, aliases and absent resources.
-- [ ] Run the complete research suite, formatting, strict Clippy and release compilation on both platforms.
+- [x] Establish failing behavioral tests on Windows and Linux.
+- [x] Implement bounded metadata parsing with duplicate rejection, fixed errors and no sensitive output.
+- [x] Implement layout-specific selection from existing filenames, rejecting traversal, aliases and absent resources.
+- [x] Run the complete research suite, formatting, strict Clippy and release compilation on both platforms.
 
 Constraints: no phone calls, no NFC payload modification, no metadata/signature write targets, no pass-id guessing. No new dependencies. No claim of phone editing or NFC reader compatibility. PNG names are resource candidates, not a guarantee of visible rendering. Localized resources and modern poster layouts remain unsupported. A modified signed package would need valid issuer signing before import; this component neither signs nor installs packages.
 
