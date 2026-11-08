@@ -1,5 +1,7 @@
 //! Research-only local snapshot storage. Never acquires files from a phone, never
 //! restores them and never proves provenance or authorizes a device write.
+pub mod pass_artwork;
+
 use anyhow::{Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
