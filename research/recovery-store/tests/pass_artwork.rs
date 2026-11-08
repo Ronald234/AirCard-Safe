@@ -28,10 +28,19 @@ fn nfc_store_card_uses_existing_visual_assets_without_exporting_credentials() {
 #[test]
 fn each_layout_selects_only_its_existing_image_families() {
     for (metadata, expected) in [
-        (br#"{"generic":{}}"#.as_slice(), vec!["logo.png", "thumbnail.png"]),
-        (br#"{"storeCard":{}}"#.as_slice(), vec!["logo.png", "strip.png"]),
+        (
+            br#"{"generic":{}}"#.as_slice(),
+            vec!["logo.png", "thumbnail.png"],
+        ),
+        (
+            br#"{"storeCard":{}}"#.as_slice(),
+            vec!["logo.png", "strip.png"],
+        ),
         (br#"{"coupon":{}}"#.as_slice(), vec!["logo.png", "strip.png"]),
-        (br#"{"boardingPass":{}}"#.as_slice(), vec!["footer.png", "logo.png"]),
+        (
+            br#"{"boardingPass":{}}"#.as_slice(),
+            vec!["footer.png", "logo.png"],
+        ),
         (
             br#"{"eventTicket":{}}"#.as_slice(),
             vec!["background.png", "logo.png", "strip.png", "thumbnail.png"],
@@ -39,7 +48,13 @@ fn each_layout_selects_only_its_existing_image_families() {
     ] {
         let inventory = inspect(
             metadata,
-            &["strip.png", "logo.png", "thumbnail.png", "footer.png", "background.png"],
+            &[
+                "strip.png",
+                "logo.png",
+                "thumbnail.png",
+                "footer.png",
+                "background.png",
+            ],
         )
         .unwrap();
         assert_eq!(inventory.images, expected);
