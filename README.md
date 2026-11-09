@@ -6,7 +6,7 @@ Aplicación nativa de Windows para diagnosticar la detección de Apple Wallet po
 
 ## Descargar el ejecutable
 
-La revisión 5 se compila desde la rama `research/pass-artwork`. Abre una ejecución correcta de esa rama y descarga su artifact; no uses un artifact antiguo de la revisión 4.
+**[Descargar revisión 5 verificada](https://github.com/Ronald234/AirCard-Safe/actions/runs/42556330570/artifacts/13647991967)**. Código compilado `25b1471`; [resultados, SHA-256 y pendientes](docs/LOCAL-PASS-EDITOR-RESULTS.md). Esta versión añade el editor local; la edición de imágenes en pases NFC instalados sigue pendiente.
 
 En [Actions: AirCard Safe Windows](https://github.com/Ronald234/AirCard-Safe/actions/workflows/build.yml), abre la ejecución correcta de esta revisión que termine en **success** y descarga **AirCard-Safe-Windows-x64**. Extrae el ZIP y abre **AirCard-Safe.exe**. El paquete incluye `SHA256SUMS.txt`, `build-info.json`, los resultados de pruebas y documentación. Los artifacts caducan a los 30 días; GitHub puede exigir iniciar sesión.
 
