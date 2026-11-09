@@ -1,4 +1,4 @@
-# AirCard Safe — revisión 4
+# AirCard Safe — revisión 5
 
 Aplicación nativa de Windows para diagnosticar la detección de Apple Wallet por **USB** y preparar imágenes localmente. Código abierto MIT, derivado de [Lumid-Off/AirCard-Windows](https://github.com/Lumid-Off/AirCard-Windows), con comparación técnica del [fork de dhava-gautama](https://github.com/dhava-gautama/AirCard-Windows).
 
@@ -6,13 +6,17 @@ Aplicación nativa de Windows para diagnosticar la detección de Apple Wallet po
 
 ## Descargar el ejecutable
 
-**[Descargar revisión 4 verificada](https://github.com/Ronald234/AirCard-Safe/actions/runs/41754963135/artifacts/13288007407)**. La ejecución de Windows terminó correctamente; el SHA-256 y los resultados están en [STATUS.md](docs/STATUS.md).
+La revisión 5 se compila desde la rama `research/pass-artwork`. Abre una ejecución correcta de esa rama y descarga su artifact; no uses un artifact antiguo de la revisión 4.
 
 En [Actions: AirCard Safe Windows](https://github.com/Ronald234/AirCard-Safe/actions/workflows/build.yml), abre la ejecución correcta de esta revisión que termine en **success** y descarga **AirCard-Safe-Windows-x64**. Extrae el ZIP y abre **AirCard-Safe.exe**. El paquete incluye `SHA256SUMS.txt`, `build-info.json`, los resultados de pruebas y documentación. Los artifacts caducan a los 30 días; GitHub puede exigir iniciar sesión.
 
 Verifica en PowerShell: `Get-FileHash .\AirCard-Safe.exe -Algorithm SHA256`. Debe coincidir con `SHA256SUMS.txt`. El SHA-256 comprueba integridad; el programa no tiene firma de código.
 
 El usuario no necesita Python, Git, Rust, Cargo ni Visual Studio. Para conectarse al iPhone necesita los controladores y bibliotecas oficiales de Apple (Apple Devices/iTunes según la instalación). No se redistribuyen DLL de Apple ni se descargan dependencias de desarrollo. Windows 10/11 x64 es el objetivo; una compilación en CI no certifica todas esas instalaciones.
+
+## Editor local de pases (nuevo)
+
+Abre un `.pkpass` que ya tengas, selecciona una de sus imágenes y prepara un PNG nuevo con sus dimensiones originales. El editor muestra el original y la vista previa del reemplazo; no modifica el paquete, no crea un pase firmado y no extrae pases del iPhone. **La edición de imágenes NFC instaladas en el teléfono sigue pendiente.** Instrucciones y límites en [LOCAL-PASS-EDITOR.md](docs/LOCAL-PASS-EDITOR.md).
 
 ## Uso
 

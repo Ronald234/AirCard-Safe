@@ -1,4 +1,4 @@
-# Matriz de compatibilidad — revisión 4
+# Matriz de compatibilidad — revisión 5
 
 Esta matriz distingue reconocimiento sintético, observación de registros reales y modificación. No es una certificación de compatibilidad. No se realizaron pruebas físicas de iPhone para esta revisión.
 
@@ -27,3 +27,7 @@ Los pases de gimnasio y tienda no tienen una implementación certificada por emi
 
 Antes de habilitar cualquier escritor se necesita demostrar la adquisición del arte original, una copia completa vinculada al dispositivo/pase correcto, validación de archivos y recuperación verificable del destino (incluidos los estados auxiliares que se modificarían). Se prefiere una lectura no destructiva. Un candidato que traslade originales necesita guardar una intención duradera de recuperación antes del primer traslado y demostrar recuperación tras interrupción y reconexión en un dispositivo físico. Una copia local con hash, un traslado temporal o una confirmación del servicio por sí solos no demuestran esa recuperación. Si la imagen pertenece a un paquete firmado, también debe respetarse la firma del emisor; no se extraen claves ni credenciales para resolverlo.
 
+
+## Editor local de la revisión 5
+
+Los formatos clásicos generic, storeCard, coupon, boardingPass y eventTicket tienen selección de imágenes y exportación PNG probadas con paquetes sintéticos. NFC declarado se informa sin interpretar sus credenciales. Esto es compatibilidad de archivo local, no detección USB ni modificación del pase instalado. Poster, estilos modernos y recursos localizados se rechazan explícitamente. Ver [LOCAL-PASS-EDITOR.md](LOCAL-PASS-EDITOR.md).
