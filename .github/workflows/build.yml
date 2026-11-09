@@ -1,7 +1,7 @@
 name: AirCard Safe Windows
 on:
   push:
-    branches: ['aircard-safe', 'aircard-safe-*', 'main', 'master', 'research/recovery-storage']
+    branches: ['aircard-safe', 'aircard-safe-*', 'main', 'master', 'research/recovery-storage', 'research/pass-artwork']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -90,9 +90,10 @@ jobs:
             commit=$env:GITHUB_SHA; runner=$env:RUNNER_OS; rust=(rustc -V | Out-String).Trim()
             binary=$pe; self_check='passed'; launch_smoke='passed'
             iphone_physical_test='NOT PERFORMED'; windows10_physical_test='NOT PERFORMED'
-            device_mutations='BLOCKED: recovery not verifiable'; revision=4
+            device_mutations='BLOCKED: recovery not verifiable'; revision=5
           } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 dist/build-info.json
           Copy-Item LICENSE, README.md, cargo-test.log, cargo-build.log, cargo-clippy.log, dependency-tree.txt -Destination dist
+          Copy-Item docs/LOCAL-PASS-EDITOR.md -Destination dist/LOCAL-PASS-EDITOR.md
           Copy-Item docs/TESTING.md -Destination dist/TESTING.md
           New-Item -ItemType Directory -Path dist/docs | Out-Null
           Copy-Item docs/UNIFIED_SCANNER.md, docs/REFRESH-FIX.md, docs/ORIGINAL-METHOD.md -Destination dist/docs

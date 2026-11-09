@@ -24,6 +24,7 @@ enum Event {
     Progress(String),
 }
 pub struct AirCardApp {
+    pass_editor: crate::pass_editor::PassEditor,
     devices: Vec<DeviceInfo>,
     selected: usize,
     cards: Vec<scanner::WalletItem>,
@@ -43,7 +44,7 @@ pub struct AirCardApp {
 impl AirCardApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let (tx, rx) = mpsc::channel();
-        Self { devices: vec![], selected: 0, cards: vec![], card_index: 0,
+        Self { pass_editor: crate::pass_editor::PassEditor::default(), devices: vec![], selected: 0, cards: vec![], card_index: 0,
             image: None, texture: None, focus: [0.5, 0.5], diagnostics: None,
             status: "Conecta el iPhone por USB, desbloquéalo y toca Confiar. Las modificaciones del teléfono están bloqueadas sin recuperación verificable.".into(),
             busy: false, scanning: false, stop: Arc::new(AtomicBool::new(false)), tx, rx, worker: None }
@@ -193,7 +194,7 @@ impl eframe::App for AirCardApp {
             ui.label(&self.status);
         });
         egui::CentralPanel::default().show(ctx, |ui| { egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.heading("AirCard Safe — revisión 4");
+            ui.heading("AirCard Safe — revisión 5");
             ui.label("Diagnóstico Wallet por USB · Imágenes locales · Windows 10/11 x64");
             ui.colored_label(egui::Color32::YELLOW, safety::RECOVERY_BLOCK_REASON);
             ui.label("No hay prueba física de compatibilidad de esta revisión con iPhone, restauración ni acceso NFC.");
@@ -255,6 +256,7 @@ impl eframe::App for AirCardApp {
                 ui.small("Exportar prepara imágenes; no crea un pase firmado ni un respaldo. Apple Card usa una representación dinámica. La detección de un pase de gimnasio o tienda no garantiza que su imagen sea modificable.");
                 if ui.button("Olvidar observaciones y diagnóstico").clicked() { self.cards.clear(); self.card_index = 0; self.diagnostics = None; }
             });
+            self.pass_editor.ui(ctx, ui, self.image.as_ref());
         }); });
     }
 }

@@ -15,6 +15,10 @@ mod diagnostics;
 mod flasher;
 mod image_skin;
 mod local_export;
+#[path = "../research/recovery-store/src/pass_artwork.rs"]
+mod pass_artwork;
+mod pass_editor;
+mod pass_package;
 mod safety;
 mod scanner;
 #[cfg(test)]
@@ -35,7 +39,7 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1080.0, 760.0])
             .with_min_inner_size([880.0, 560.0])
-            .with_title("AirCard Safe - revision 4"),
+            .with_title("AirCard Safe - revision 5"),
         ..Default::default()
     };
 
