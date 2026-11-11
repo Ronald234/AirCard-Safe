@@ -22,6 +22,9 @@ jobs:
       - name: Verify Windows PE
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           ./scripts/test-verify-pe.ps1
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./scripts/verify-pe.ps1 -Path target/release/AirCard-Safe.exe
+          $pe = ./scripts/verify-pe.ps1 -Path target/release/AirCard-Safe.exe
+          if ($null -eq $pe -or $pe.Format -ne 'PE32+' -or $pe.Machine -ne 'AMD64') { throw 'PE verification produced no valid result' }
+          $pe | ConvertTo-Json
+          $pe | ConvertTo-Json | Set-Content -Encoding utf8 verified-pe.json
