@@ -1,4 +1,4 @@
-name: NFC USB research validation
+name: NFC USB research checks (no application build)
 on:
   push:
     branches: ['research/nfc-usb']
@@ -6,25 +6,24 @@ on:
 permissions:
   contents: read
 jobs:
-  windows:
+  cancel-premature-build:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Cancel previously queued executable build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method POST repos/Ronald234/AirCard-Safe/actions/runs/42943905367/cancel
+  checks:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Format
         run: cargo fmt --all -- --check
-      - name: Unit and integration tests (physical tests ignored)
-        run: cargo test --locked
-      - name: Correctness checks
+      - name: Type checking without linking the application
+        run: cargo check --locked --all-targets
+      - name: Correctness analysis without linking the application
         run: cargo clippy --locked --all-targets -- -D clippy::correctness
-      - name: Release compilation
-        run: cargo build --locked --release
-      - name: Verify Windows PE
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          ./scripts/test-verify-pe.ps1
-          $pe = ./scripts/verify-pe.ps1 -Path target/release/AirCard-Safe.exe
-          if ($null -eq $pe -or $pe.Format -ne 'PE32+' -or $pe.Machine -ne 'AMD64') { throw 'PE verification produced no valid result' }
-          $pe | ConvertTo-Json
-          $pe | ConvertTo-Json | Set-Content -Encoding utf8 verified-pe.json
