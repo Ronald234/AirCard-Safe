@@ -6,16 +6,6 @@ on:
 permissions:
   contents: read
 jobs:
-  cancel-premature-build:
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Cancel previously queued executable build
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh api --method POST repos/Ronald234/AirCard-Safe/actions/runs/42943905367/cancel
   checks:
     runs-on: windows-latest
     timeout-minutes: 30

@@ -6,7 +6,7 @@ Status: unresolved. This branch is not a release with NFC artwork editing enable
 
 - Accept anchored `PassbookUIService` and `PassKitCore` event sources. Preserve the existing identifier validation and reject redacted identifiers. Three synthetic regression tests cover the newly accepted sources, an unrelated logger embedding a Wallet source name, and `<private>`.
 - Construct AFC with a borrowed socket (`AFCConnectionCreate`, `closeOnInvalidate=0`). The AMD service retains socket ownership. AFC closes before the service is invalidated. An ignored physical regression reads Media directory metadata and repeats open/read/drop five times; it never prints directory contents or device identifiers.
-- Run Windows format, locked tests, correctness analysis, locked release compilation and PE verification on this research branch. No executable artifact is published by this workflow because the requested editing capability remains unresolved.
+- Research CI now performs format, type and correctness checks only. No application linking, release build, PE check or executable publication is enabled until the native NFC editing problems are resolved.
 
 ## Scope of verification
 
@@ -15,7 +15,7 @@ Automated tests do not prove a pass is detected on a physical iPhone. The physic
 Local Linux recovery-store tests: 21 passed. These validate local storage and synthetic pass inventories, not acquisition of protected files from an iPhone.
 
 Windows validation: https://github.com/Ronald234/AirCard-Safe/actions/runs/42942595397
-Consult the actual run conclusion; a pending run is not a pass.
+This run passed 144 test executions (3 physical tests ignored), format, correctness checks and release compilation. Its compiled-PE verification was NOT completed: a PowerShell exit-code check skipped the final command. No executable artifact was published. A follow-up build run (42943905367) was cancelled after the user reiterated that no new application executable may be created until NFC editing is solved. Do not rerun either build workflow as part of this research.
 
 ## What still prevents editing
 
