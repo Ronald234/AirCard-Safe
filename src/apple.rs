@@ -297,6 +297,13 @@ pub struct AppleLibraries {
 
     // AFC functions
     pub afc_connection_open: unsafe extern "C" fn(i32, u32, *mut AFCConnectionRef) -> i32,
+    pub afc_connection_create: unsafe extern "C" fn(
+        CFAllocatorRef,
+        i32,
+        i32,
+        *const std::ffi::c_void,
+        *mut std::ffi::c_void,
+    ) -> AFCConnectionRef,
     pub afc_connection_close: unsafe extern "C" fn(AFCConnectionRef) -> i32,
     pub afc_connection_set_secure_context:
         unsafe extern "C" fn(AFCConnectionRef, *mut std::ffi::c_void) -> i32,
@@ -464,6 +471,7 @@ pub fn get_apple_libraries() -> Result<Arc<AppleLibraries>> {
             load_sym!(md_lib, "AMDServiceConnectionReceiveMessage");
 
         let afc_connection_open = load_sym!(md_lib, "AFCConnectionOpen");
+        let afc_connection_create = load_sym!(md_lib, "AFCConnectionCreate");
         let afc_connection_close = load_sym!(md_lib, "AFCConnectionClose");
         let afc_connection_set_secure_context = load_sym!(md_lib, "AFCConnectionSetSecureContext");
         let afc_connection_set_dispose_secure_context =
@@ -548,6 +556,7 @@ pub fn get_apple_libraries() -> Result<Arc<AppleLibraries>> {
             amd_service_connection_receive_message,
 
             afc_connection_open,
+            afc_connection_create,
             afc_connection_close,
             afc_connection_set_secure_context,
             afc_connection_set_dispose_secure_context,

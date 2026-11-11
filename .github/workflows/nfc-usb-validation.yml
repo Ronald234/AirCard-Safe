@@ -1,0 +1,27 @@
+name: NFC USB research validation
+on:
+  push:
+    branches: ['research/nfc-usb']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Unit and integration tests (physical tests ignored)
+        run: cargo test --locked
+      - name: Correctness checks
+        run: cargo clippy --locked --all-targets -- -D clippy::correctness
+      - name: Release compilation
+        run: cargo build --locked --release
+      - name: Verify Windows PE
+        shell: pwsh
+        run: |
+          ./scripts/test-verify-pe.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/verify-pe.ps1 -Path target/release/AirCard-Safe.exe

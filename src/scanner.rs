@@ -65,7 +65,7 @@ fn has_wallet_context(line: &str) -> bool {
         Regex::new(
         // Source context belongs to the prefix, never a quoted/embedded
         // process or framework name in an unrelated logger's message.
-        r#"(?i)^\s*(?:(?:(?:[a-z]{3}\s+[0-9]{1,2}\s+|[0-9]{4}-[0-9]{2}-[0-9]{2}[T ])[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:?[0-9]{2})?\s+\S+\s+)?(?:passd|nfcd|nanopassd|passbook|npkcompanion|passkit|passkitui)(?:[\s:(\[]|$)|[^:\r\n()]{1,128}\((?:passkit|passkitui|stockholm|wallet)\):|(?:PDCardFileManager|PDPassLibrary|VerificationCheck)[:.])"#
+        r#"(?i)^\s*(?:(?:(?:[a-z]{3}\s+[0-9]{1,2}\s+|[0-9]{4}-[0-9]{2}-[0-9]{2}[T ])[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:?[0-9]{2})?\s+\S+\s+)?(?:passd|nfcd|nanopassd|passbook(?:uiservice)?|npkcompanion|passkit(?:core|ui)?)(?:[\s:(\[]|$)|[^:\r\n()]{1,128}\((?:passkit(?:core|ui)?|stockholm|wallet)\):|(?:PDCardFileManager|PDPassLibrary|VerificationCheck)[:.])"#
     ).unwrap()
     });
     line.len() <= 128 * 1024 && CONTEXT.is_match(line)
@@ -761,5 +761,41 @@ mod framework_prefix_tests {
             vec![WalletItem::CandidatePass("synthetic-pass-123456789".into())]
         );
         assert!(extract_wallet_items("webserver: SpringBoard(PassKit): selected pass uniqueID : \"synthetic-pass-123456789\"").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod wallet_service_context_regressions {
+    use super::*;
+
+    #[test]
+    fn passbook_ui_service_and_passkit_core_are_wallet_context() {
+        for prefix in [
+            "PassbookUIService(PassKitCore):",
+            "PassbookUIService:",
+            "Passbook(PassKitCore):",
+        ] {
+            let line = format!("{prefix} selected pass uniqueID : synthetic-pass-123456789");
+            assert_eq!(
+                extract_wallet_items(&line),
+                vec![WalletItem::CandidatePass("synthetic-pass-123456789".into())],
+                "{prefix}"
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_wallet_service_does_not_authorize_unrelated_logger() {
+        assert!(extract_wallet_items("browser: PassbookUIService(PassKitCore): selected pass uniqueID : synthetic-pass-123456789").is_empty());
+    }
+
+    #[test]
+    fn redacted_wallet_service_does_not_invent_an_identifier() {
+        assert!(
+            extract_wallet_items(
+                "PassbookUIService(PassKitCore): selected pass uniqueID : <private>"
+            )
+            .is_empty()
+        );
     }
 }

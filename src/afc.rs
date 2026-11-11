@@ -36,11 +36,13 @@ impl AfcClient {
 
         unsafe {
             let socket = (libs.amd_service_connection_get_socket)(service_conn);
-            let mut conn: AFCConnectionRef = ptr::null_mut();
-            let status = (libs.afc_connection_open)(socket, 0, &mut conn);
-            if status != 0 || conn.is_null() {
+            // The AMD service owns this socket. AFC must borrow it, otherwise
+            // closing AFC followed by invalidating the service closes it twice.
+            let conn =
+                (libs.afc_connection_create)(ptr::null(), socket, 0, ptr::null(), ptr::null_mut());
+            if conn.is_null() {
                 (libs.amd_service_connection_invalidate)(service_conn);
-                bail!("AFCConnectionOpen failed with code {}", status);
+                bail!("Could not create a borrowing AFC connection");
             }
 
             let secure_context = (libs.amd_service_connection_get_secure_io_context)(service_conn);
@@ -287,6 +289,25 @@ impl AfcClient {
 
             let _ = (self.libs.afc_directory_close)(self.conn, dir);
             Ok(entries)
+        }
+    }
+}
+
+#[cfg(test)]
+mod physical_connection_regressions {
+    #[test]
+    #[ignore = "Requires exactly one paired USB iPhone; reads Media directory metadata only"]
+    fn repeated_afc_read_and_drop_does_not_close_service_socket_twice() {
+        use crate::device::{ActiveDeviceSession, ConnectionMode, list_connected_devices};
+        let devices = list_connected_devices().expect("USB enumeration failed");
+        assert_eq!(devices.len(), 1, "Connect exactly one paired USB iPhone");
+        for _ in 0..5 {
+            let session = ActiveDeviceSession::open(Some(&devices[0].udid), ConnectionMode::Usb)
+                .expect("USB session failed");
+            let afc = super::AfcClient::new(&session).expect("AFC setup failed");
+            afc.list_directory("/").expect("Media listing failed");
+            drop(afc);
+            drop(session);
         }
     }
 }
